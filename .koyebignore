@@ -1,0 +1,27 @@
+# Python Bytecode (Recursive)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Environments & Dependencies
+.venv/
+venv/
+env/
+bin/
+lib/
+include/
+
+# Version Control & IDEs
+.git/
+.github/
+.vscode/
+.idea/
+*.swp
+
+# Sensitive & Temp files
+.env
+*.log
+*.zip
+*.tar.gz
+*.sqlite3

@@ -1,0 +1,24 @@
+# Environment variables
+.env
+.env.koyeb
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE folders
+.vscode/
+.idea/
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# OS metadata
+.DS_Store
+Thumbs.db

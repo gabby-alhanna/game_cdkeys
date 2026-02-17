@@ -1,0 +1,21 @@
+name: game-cdkeys
+services:
+  - name: bot-service
+    type: worker
+    instance_type: micro
+    build:
+      builder: buildpack
+    run: python bot.py    # ⬅️ This must be exactly at this level
+    env:
+      - key: BOT_TOKEN
+        value: "7124904391:AAGN-AEzkdb76GjVQKPhcj0PNOtYFf1b7UI"
+      - key: ADMIN_CHAT_ID
+        value: "819385459"
+      - key: DB_USER
+        value: "neondb_owner"
+      - key: DB_NAME
+        value: "neondb"
+      - key: DB_PASSWORD
+        value: "npg_sCWvwBb6g7mh"
+      - key: DB_HOST
+        value: "ep-fragrant-cherry-ag08fztv-pooler.c-2.eu-central-1.aws.neon.tech"
