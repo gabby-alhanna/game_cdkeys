@@ -98,6 +98,12 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     if not ready:
         return await callback.answer("⚠️ النظام غير متاح حالياً.", show_alert=True)
 
+    # التحقق من وجود رمز QR صالح
+    if not config.get('superadmin_qr_file_id'):
+        await callback.message.answer("❌ لم يتم تعيين رمز QR للشحن بعد. يرجى إبلاغ المشرف.")
+        await callback.answer()
+        return
+
     # التحقق من وجود طلب معلق
     pending = await db.fetchval(
         "SELECT 1 FROM balance_requests WHERE user_id=(SELECT id FROM users WHERE chat_id=$1) AND status='pending'",
@@ -116,6 +122,7 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     )
     await callback.message.delete()
     await callback.answer()
+
 
 @router.message(UserCharge.waiting_transfer_code, F.text.not_in(SPECIAL_BUTTONS))
 async def user_code(message: types.Message, state: FSMContext):
