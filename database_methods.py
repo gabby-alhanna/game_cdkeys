@@ -16,5 +16,5 @@ async def get_system_settings():
 async def is_system_ready():
     s = await get_system_settings()
     if not s or not s['superadmin_shamcash_code'] or not s['superadmin_qr_file_id']:
-        return False, {}
+        return False, dict(s)
     return True, dict(s)

@@ -114,12 +114,23 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(UserCharge.waiting_transfer_code)
     builder = get_cancel_button()
-    await callback.message.answer_photo(
-        photo=config['superadmin_qr_file_id'],
-        caption=f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>رمز التحويل</b>:",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+    try:
+        await callback.message.answer_photo(
+            photo=config['superadmin_qr_file_id'],
+            caption=f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>رمز التحويل</b>:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    except TelegramBadRequest as e:
+        # إذا كان معرف الصورة غير صالح، نرسل رسالة نصية بدلاً من ذلك
+        logging.error(f"QR code file ID invalid: {e}")
+        await callback.message.answer(
+            f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\n"
+            f"⚠️ تعذر إرسال صورة رمز QR. يرجى إبلاغ المشرف.\n\n"
+            f"الخطوة 1: أرسل <b>رمز التحويل</b>:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
     await callback.message.delete()
     await callback.answer()
 
