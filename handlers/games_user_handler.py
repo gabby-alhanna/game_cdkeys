@@ -10,7 +10,8 @@ def escape_html(text):
 
 async def show_games_page(target, page: int = 0):
     """
-    عرض قائمة الألعاب. target يمكن أن يكون CallbackQuery أو Message.
+    عرض قائمة الألعاب للمستخدم بتنسيق 4x2.
+    تستخدم منطق العرض المرن (حتى 12 لعبة في صفحة واحدة).
     """
     if isinstance(target, types.CallbackQuery):
         message = target.message
@@ -19,57 +20,87 @@ async def show_games_page(target, page: int = 0):
         message = target
         is_callback = False
 
-    games = await get_games(page, only_active=True)
-    total = await count_games(only_active=True)
-    total_pages = (total + 3 - 1) // 3
+    # جلب العدد الإجمالي للألعاب النشطة فقط
+    total_count = await count_games(only_active=True)
+    
+    # الإعدادات المثالية للتنسيق
+    MAX_SINGLE_PAGE = 12 
+    DEFAULT_PAGE_SIZE = 8
 
+    # تحديد ما إذا كنا سنعرض صفحة واحدة أم نستخدم التقسيم
+    if total_count <= MAX_SINGLE_PAGE:
+        games = await get_games(0, only_active=True, limit=total_count)
+        total_pages = 1
+        current_page = 0
+    else:
+        games = await get_games(page, only_active=True, limit=DEFAULT_PAGE_SIZE)
+        total_pages = (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE
+        current_page = page
+
+    # التعامل مع حالة عدم وجود ألعاب
     if not games:
+        text = "❌ لا توجد ألعاب متاحة حالياً."
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🔙 القائمة الرئيسية", callback_data="user_back"))
+        
         if is_callback:
-            await target.answer("لا توجد ألعاب متاحة حالياً.", show_alert=True)
+            await target.answer(text, show_alert=True)
             return
         else:
-            builder = InlineKeyboardBuilder()
-            builder.row(types.InlineKeyboardButton(text="🔙 القائمة الرئيسية", callback_data="user_back"))
-            await target.delete()
-            await target.answer("لا توجد ألعاب متاحة حالياً.", show_alert=True, reply_markup=builder.as_markup())
+            await message.answer(text, reply_markup=builder.as_markup())
             return
 
-    else:
-        text = "🎮 **الألعاب المتاحة**\n\n"
-        builder = InlineKeyboardBuilder()
-        for g in games:
-            builder.row(types.InlineKeyboardButton(text=g['name'], callback_data=f"user_game:{g['id']}"))
-        if total_pages > 1:
-            nav_row = []
-            if page > 0:
-                nav_row.append(types.InlineKeyboardButton(text="◀️", callback_data=f"user_games_page:{page-1}"))
-            nav_row.append(types.InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="ignore"))
-            if page < total_pages-1:
-                nav_row.append(types.InlineKeyboardButton(text="▶️", callback_data=f"user_games_page:{page+1}"))
-            builder.row(*nav_row)
-        builder.row(types.InlineKeyboardButton(text="🔙 القائمة الرئيسية", callback_data="user_back"))
+    # بناء الواجهة للألعاب
+    text = "🎮 **الألعاب المتاحة**\n\nاختر اللعبة التي تود استعراضها:"
+    builder = InlineKeyboardBuilder()
 
+    # إضافة الألعاب (تنسيق عمودين)
+    for g in games:
+        builder.add(types.InlineKeyboardButton(
+            text=g['name'], 
+            callback_data=f"user_game:{g['id']}")
+        )
+    
+    # تطبيق التنسيق 2 في كل صف
+    builder.adjust(2)
+
+    # إضافة أزرار التنقل (Pagination) إذا لزم الأمر
+    if total_pages > 1:
+        nav_buttons = []
+        if current_page > 0:
+            nav_buttons.append(types.InlineKeyboardButton(text="◀️", callback_data=f"user_games_page:{current_page-1}"))
+        else:
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
+            
+        nav_buttons.append(types.InlineKeyboardButton(text=f"{current_page+1}/{total_pages}", callback_data="ignore"))
+        
+        if current_page < total_pages - 1:
+            nav_buttons.append(types.InlineKeyboardButton(text="▶️", callback_data=f"user_games_page:{current_page+1}"))
+        else:
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
+            
+        builder.row(*nav_buttons)
+
+    # زر الرجوع الدائم
+    builder.row(types.InlineKeyboardButton(text="🔙 القائمة الرئيسية", callback_data="user_back"))
+
+    # منطق الإرسال / التعديل
+    reply_markup = builder.as_markup()
+    
     if is_callback:
-        # إذا كانت الرسالة الحالية تحتوي على صورة، احذف وأرسل جديدة
+        # إذا كانت الرسالة الحالية تحتوي على صورة (مثل واجهة اللعبة السابقة)
         if message.photo:
             await message.delete()
-            if builder:
-                await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-            else:
-                await message.answer(text, parse_mode="HTML")
+            await message.answer(text, reply_markup=reply_markup, parse_mode="Markdown")
         else:
-            # رسالة نصية – تعديل
-            if builder:
-                await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-            else:
-                await message.edit_text(text, parse_mode="HTML")
+            try:
+                await message.edit_text(text, reply_markup=reply_markup, parse_mode="Markdown")
+            except Exception:
+                # لتجنب خطأ edit_text إذا لم يتغير المحتوى
+                pass
     else:
-        # رسالة جديدة
-        if builder:
-            await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
-        else:
-            await message.answer(text, parse_mode="HTML")
-
+        await message.answer(text, reply_markup=reply_markup, parse_mode="Markdown")
+    
 @router.callback_query(F.data == "view_games")
 async def user_view_games(callback: types.CallbackQuery):
     # لا تحذف الرسالة المحفزة – سنقوم بتعديلها

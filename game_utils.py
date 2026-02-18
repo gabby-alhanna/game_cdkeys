@@ -2,16 +2,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import types
 from database import db
 
-PAGE_SIZE = 3
+GAME_PAGE_SIZE = 8
+PACKAGE_PAGE_SIZE = 3
 
-async def get_games(page: int = 0, only_active: bool = True):
-    """Fetch games with pagination."""
-    offset = page * PAGE_SIZE
+async def get_games(page: int = 0, only_active: bool = True, limit: int = None):
+    """Fetch games with flexible pagination."""
+    # إذا لم يتم تمرير limit، نستخدم PAGE_SIZE الافتراضية
+    current_limit = limit if limit is not None else GAME_PAGE_SIZE
+    offset = page * current_limit
+    
     query = "SELECT id, name, image_file_id, description FROM games"
     if only_active:
         query += " WHERE is_active = TRUE"
+        
     query += " ORDER BY name LIMIT $1 OFFSET $2"
-    return await db.fetch(query, PAGE_SIZE, offset)
+    return await db.fetch(query, current_limit, offset)
 
 async def count_games(only_active: bool = True):
     query = "SELECT COUNT(*) FROM games"
@@ -23,7 +28,7 @@ async def get_game(game_id: str):
     return await db.fetchrow("SELECT * FROM games WHERE id = $1", game_id)
 
 async def get_packages(game_id: str, page: int = 0):
-    offset = page * PAGE_SIZE
+    offset = page * PACKAGE_PAGE_SIZE
     return await db.fetch(
         """
         SELECT id, name, price 
@@ -32,8 +37,9 @@ async def get_packages(game_id: str, page: int = 0):
         ORDER BY created_at ASC  -- الترتيب من الأقدم إلى الأحدث (ترتيب الإدخال)
         LIMIT $2 OFFSET $3
         """,
-        game_id, PAGE_SIZE, offset
+        game_id, PACKAGE_PAGE_SIZE, offset
     )
+
 async def count_packages(game_id: str):
     return await db.fetchval("SELECT COUNT(*) FROM game_packages WHERE game_id = $1", game_id)
 

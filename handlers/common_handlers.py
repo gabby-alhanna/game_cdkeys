@@ -25,3 +25,11 @@ def get_cancel_button() -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_action"))
     return builder
+
+@router.callback_query(F.data == "ignore")
+async def handle_ignore_callback(callback: types.CallbackQuery):
+    """
+    معالج للأزرار التي لا تتطلب استجابة.
+    هذا يمنع ظهور علامة التحميل (الخادم لا يستجيب) عند المستخدم.
+    """
+    await callback.answer()

@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from .common_handlers import get_cancel_button
-from game_utils import get_games, count_games, get_game, pagination_keyboard, PAGE_SIZE
+from game_utils import get_games, count_games, get_game, pagination_keyboard, GAME_PAGE_SIZE
 from database import db
 from static_lists import SPECIAL_BUTTONS
 import os
@@ -28,7 +28,6 @@ async def admin_games_start(callback: types.CallbackQuery, state: FSMContext):
     await show_games_page(callback, page=0)
 
 async def show_games_page(target, page: int):
-    """عرض قائمة الألعاب. target يمكن أن يكون CallbackQuery أو Message."""
     if isinstance(target, types.CallbackQuery):
         message = target.message
         is_callback = True
@@ -36,43 +35,65 @@ async def show_games_page(target, page: int):
         message = target
         is_callback = False
 
-    games = await get_games(page, only_active=False)
-    total = await count_games(only_active=False)
-    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+    total_count = await count_games(only_active=False)
+    
+    # الإعدادات الخاصة بك
+    MAX_SINGLE_PAGE = 12 
+    DEFAULT_PAGE_SIZE = 8 # تم تعديلها لـ 8 لتناسب 4x2 كما طلبت
 
-    text = "🎮 **جميع الألعاب**\n\n"
-    if not games:
-        text += "لا توجد ألعاب بعد."
+    if total_count <= MAX_SINGLE_PAGE:
+        # نمرر limit=total_count لجلب كل الألعاب في صفحة واحدة
+        games = await get_games(0, only_active=False, limit=total_count)
+        total_pages = 1
+        current_page = 0
     else:
-        for g in games:
-            text += f"• {g['name']}\n"
+        games = await get_games(page, only_active=False, limit=DEFAULT_PAGE_SIZE)
+        total_pages = (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE
+        current_page = page
 
+    text = "🎮 **إدارة الألعاب**"
     builder = InlineKeyboardBuilder()
-    # أزرار الألعاب
-    for g in games:
-        builder.row(types.InlineKeyboardButton(text=g['name'], callback_data=f"admin_game_view:{g['id']}"))
-    # أزرار التنقل بين الصفحات
-    if total_pages > 1:
-        nav_row = []
-        if page > 0:
-            nav_row.append(types.InlineKeyboardButton(text="◀️", callback_data=f"admin_games_page:{page-1}"))
-        nav_row.append(types.InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="ignore"))
-        if page < total_pages-1:
-            nav_row.append(types.InlineKeyboardButton(text="▶️", callback_data=f"admin_games_page:{page+1}"))
-        builder.row(*nav_row)
-    # أزرار الإجراءات للمشرف
-    builder.row(types.InlineKeyboardButton(text="➕ إضافة لعبة", callback_data="admin_game_add"))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_back"))
 
+    for g in games:
+        builder.add(types.InlineKeyboardButton(
+            text=g['name'], 
+            callback_data=f"admin_game_view:{g['id']}")
+        )
+    
+    builder.adjust(2) 
+
+    if total_pages > 1:
+        nav_buttons = []
+        # زر السابق
+        if current_page > 0:
+            nav_buttons.append(types.InlineKeyboardButton(text="◀️", callback_data=f"admin_games_page:{current_page-1}"))
+        else:
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
+        
+        nav_buttons.append(types.InlineKeyboardButton(text=f"{current_page+1}/{total_pages}", callback_data="ignore"))
+        
+        # زر التالي
+        if current_page < total_pages - 1:
+            nav_buttons.append(types.InlineKeyboardButton(text="▶️", callback_data=f"admin_games_page:{current_page+1}"))
+        else:
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
+        
+        builder.row(*nav_buttons)
+
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة لعبة جديدة", callback_data="admin_game_add"))
+    builder.row(types.InlineKeyboardButton(text="🔙 القائمة الرئيسية", callback_data="admin_back"))
+
+    reply_markup = builder.as_markup()
+    
     if is_callback:
-        # إذا كانت الرسالة الحالية تحتوي على صورة، لا يمكن تعديل النص – احذف وأرسل رسالة جديدة
         if message.photo:
             await message.delete()
-            await message.answer(text, reply_markup=builder.as_markup())
+            await message.answer(text, reply_markup=reply_markup)
         else:
-            await message.edit_text(text, reply_markup=builder.as_markup())
+            await message.edit_text(text, reply_markup=reply_markup)
     else:
-        await message.answer(text, reply_markup=builder.as_markup())
+        await message.answer(text, reply_markup=reply_markup)
+
 
 @router.callback_query(F.data.startswith("admin_games_page:"))
 async def games_page(callback: types.CallbackQuery):
