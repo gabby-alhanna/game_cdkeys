@@ -75,11 +75,20 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
 
+    port = int(os.getenv("PORT", 8000)) 
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    
+    await site.start()
+    print(f"🌍 Health check server listening on port {port}")
+
+
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     except Exception as e:
         logger.critical(f"Unexpected error: {e}")
     finally:
         await bot.session.close()
+        await runner.cleanup()
+
 if __name__ == "__main__":
     asyncio.run(main())
