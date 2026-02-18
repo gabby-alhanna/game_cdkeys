@@ -25,10 +25,15 @@ async def get_game(game_id: str):
 async def get_packages(game_id: str, page: int = 0):
     offset = page * PAGE_SIZE
     return await db.fetch(
-        "SELECT id, name, price FROM game_packages WHERE game_id = $1 ORDER BY name LIMIT $2 OFFSET $3",
+        """
+        SELECT id, name, price 
+        FROM game_packages 
+        WHERE game_id = $1 
+        ORDER BY created_at ASC  -- الترتيب من الأقدم إلى الأحدث (ترتيب الإدخال)
+        LIMIT $2 OFFSET $3
+        """,
         game_id, PAGE_SIZE, offset
     )
-
 async def count_packages(game_id: str):
     return await db.fetchval("SELECT COUNT(*) FROM game_packages WHERE game_id = $1", game_id)
 
