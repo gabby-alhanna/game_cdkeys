@@ -57,7 +57,7 @@ async def get_display_text(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-@router.message(EditButton.waiting_image, F.photo)
+@router.message(EditButton.waiting_image, F.photo, F.text.not_in(SPECIAL_BUTTONS))
 async def get_image(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     await state.update_data(image_file_id=file_id)
@@ -69,7 +69,7 @@ async def get_image(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-@router.message(EditButton.waiting_image, F.text == ".") 
+@router.message(EditButton.waiting_image, F.text == ".", F.text.not_in(SPECIAL_BUTTONS)) 
 async def skip_image(message: types.Message, state: FSMContext):
     await state.update_data(image_file_id=None)
     await state.set_state(EditButton.waiting_description)
@@ -91,12 +91,12 @@ async def get_description(message: types.Message, state: FSMContext):
     reset_keyboard_hint()
     await state.clear()
     await message.answer(f"✅ تم تحديث الزر **{button_key}** بنجاح!", parse_mode="HTML")
+    await load_special_buttons()
     await show_settings_menu(message)
 
 @router.callback_query(F.data == "settings_back")
 async def settings_back(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.delete()
     # العودة إلى القائمة الرئيسية
     from .commands_handler import show_main_menu
     await show_main_menu(
@@ -106,3 +106,4 @@ async def settings_back(callback: types.CallbackQuery, state: FSMContext):
         set_reply_keyboard=False
     )
     await callback.answer()
+    await callback.message.delete()

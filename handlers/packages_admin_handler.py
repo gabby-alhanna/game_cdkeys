@@ -8,6 +8,7 @@ from database import db
 from static_lists import SPECIAL_BUTTONS
 import os
 import html
+import logging
 
 router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
@@ -89,46 +90,46 @@ async def show_game_details_with_packages(target, game_id: str, page: int = 0):
 
     # إذا كانت هناك صورة، أرسل/حدّث مع الصورة
     if game.get('image_file_id'):
-        if is_callback:
-            # بالنسبة للـ callback، يجب التعامل مع رسائل الصور بشكل صحيح
-            if message.photo:
-                # إذا كانت الرسالة الحالية تحتوي على صورة، يمكن تعديل التعليق ولكن ليس الوسائط
-                # لذا سنعدل التعليق ولوحة المفاتيح
-                try:
-                    await message.edit_caption(caption=full_text, reply_markup=builder.as_markup())
-                except:
-                    # إذا فشل ذلك، احذف وأرسل جديد
-                    await message.delete()
-                    await message.answer_photo(
-                        photo=game['image_file_id'],
-                        caption=full_text,
-                        reply_markup=builder.as_markup()
-                    )
-            else:
-                # الرسالة الحالية نصية، لا يمكن التعديل إلى صورة – يجب إرسال جديد
-                await message.delete()
+        try:
+            if is_callback:
+                # Try to send the photo as a new message first
                 await message.answer_photo(
                     photo=game['image_file_id'],
                     caption=full_text,
                     reply_markup=builder.as_markup()
                 )
-        else:
-            await message.answer_photo(
-                photo=game['image_file_id'],
-                caption=full_text,
-                reply_markup=builder.as_markup()
-            )
+                # If successful, delete the original message
+                await message.delete()
+            else:
+                await message.answer_photo(
+                    photo=game['image_file_id'],
+                    caption=full_text,
+                    reply_markup=builder.as_markup()
+                )
+        except Exception as e:
+            logging.warning(f"فشل إرسال صورة اللعبة {game_id}: {e}")
+            # Photo failed – fall back to text
+            if is_callback:
+                # Original message still exists, edit it to text
+                if message.photo:
+                    # Current message is a photo – delete and send new text
+                    await message.delete()
+                    await message.answer(full_text, reply_markup=builder.as_markup())
+                else:
+                    await message.edit_text(full_text, reply_markup=builder.as_markup())
+            else:
+                await message.answer(full_text, reply_markup=builder.as_markup())
     else:
-        # لا توجد صورة
+        # No image
         if is_callback:
             if message.photo:
-                # الرسالة تحتوي على صورة ولكننا نريد نصاً الآن – احذف وأرسل نص
                 await message.delete()
                 await message.answer(full_text, reply_markup=builder.as_markup())
             else:
                 await message.edit_text(full_text, reply_markup=builder.as_markup())
         else:
             await message.answer(full_text, reply_markup=builder.as_markup())
+
 
 @router.callback_query(F.data.startswith("pp:"))
 async def packages_page(callback: types.CallbackQuery):

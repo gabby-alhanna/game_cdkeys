@@ -8,6 +8,10 @@ async def get_or_create_user(chat_id, full_name):
             chat_id, full_name
         )
         user = await db.fetchrow("SELECT * FROM users WHERE chat_id = $1", chat_id)
+    else:
+        if user['full_name'] != full_name:
+            await db.execute("UPDATE users SET full_name = $1 WHERE chat_id = $2", full_name, chat_id)
+            user = await db.fetchrow("SELECT * FROM users WHERE chat_id = $1", chat_id)  # fetch updated
     return user
 
 async def get_system_settings():

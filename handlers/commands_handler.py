@@ -1,13 +1,12 @@
 import os
 import html
 from aiogram import Router, types, F
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database_methods import get_or_create_user, is_system_ready
 from reply_buttons import get_all_buttons, build_reply_keyboard
 from .settings_handler import show_settings_menu
-from .hint_tracker import _shown_keyboard_hint
 from database import db
 from decimal import Decimal
 
@@ -37,32 +36,29 @@ async def show_main_menu(
     escaped_username = escape_html(user['full_name'])
     builder = InlineKeyboardBuilder()
     
-    # التحقق من وجود طلب شحن معلق
     pending = await db.fetchrow("""
         SELECT id FROM balance_requests
         WHERE user_id = (SELECT id FROM users WHERE chat_id = $1)
         AND status = 'pending'
     """, user_id)
     
-    # ===== Welcome message from reply_buttons (main) =====
-    main_button = await db.fetchrow("SELECT image_file_id, description FROM reply_buttons WHERE button_key = 'main'")
-    if main_button:
-        reply_kb = None
-        if set_reply_keyboard:
+    # Only show welcome message on explicit start (Main or /start)
+    if set_reply_keyboard:
+        main_button = await db.fetchrow("SELECT image_file_id, description FROM reply_buttons WHERE button_key = 'main'")
+        if main_button:
             is_admin = (user_id == ADMIN_CHAT_ID)
-            reply_kb = await build_reply_keyboard(is_admin)
-        
-        welcome_text = main_button['description'] or "مرحباً بك في البوت!"
-        if main_button['image_file_id']:
-            await message.answer_photo(
-                photo=main_button['image_file_id'],
-                caption=welcome_text,
-                reply_markup=reply_kb,
-                parse_mode="HTML"
-            )
-        else:
-            await message.answer(welcome_text, parse_mode="HTML", reply_markup=reply_kb,)
-    # =====================================================
+            reply_kb = await build_reply_keyboard(is_admin) if set_reply_keyboard else None
+            
+            welcome_text = main_button['description'] or "مرحباً بك في البوت!"
+            if main_button['image_file_id']:
+                await message.answer_photo(
+                    photo=main_button['image_file_id'],
+                    caption=welcome_text,
+                    reply_markup=reply_kb,
+                    parse_mode="HTML"
+                )
+            else:
+                await message.answer(welcome_text, parse_mode="HTML", reply_markup=reply_kb)
     
     if user_id == ADMIN_CHAT_ID:
         text = (
@@ -72,6 +68,7 @@ async def show_main_menu(
         builder.row(types.InlineKeyboardButton(text="عرض طلبات الشحن", callback_data="admin_requests"))
         builder.row(types.InlineKeyboardButton(text="عرض الألعاب", callback_data="admin_games"))
         builder.row(types.InlineKeyboardButton(text="عرض المشتريات", callback_data="admin_purchases"))
+        builder.row(types.InlineKeyboardButton(text="إدارة المستخدمين", callback_data="admin_user_management"))
         builder.row(types.InlineKeyboardButton(text="تعديل المعلومات", callback_data="admin_edit"))
     else:
         if not ready:
@@ -82,7 +79,7 @@ async def show_main_menu(
             builder.row(types.InlineKeyboardButton(text="تصفح الألعاب", callback_data="view_games"))
             builder.row(types.InlineKeyboardButton(text="سجل العمليات", callback_data="view_history"))
             await message.answer(
-                "مرحباً! النظام قيد التحديث حاليًا. يرجى المحاولة لاحقًا.",
+                "مرحباً! النظام قيد التحديث حالياً. يرجى المحاولة لاحقاً.",
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML"
             )
@@ -93,7 +90,6 @@ async def show_main_menu(
                 f"🏷 <b>المستخدم:</b> {escaped_username}\n"
                 f"💰 <b>الرصيد:</b> {escape_html(user['balance'])} ل.س"
             )
-            # إما عرض "طلب معلق" أو "شحن الرصيد"
             if pending:
                 builder.row(types.InlineKeyboardButton(text="⏳ طلب معلق", callback_data="view_pending_request"))
             else:
@@ -104,14 +100,17 @@ async def show_main_menu(
 
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
-    
+
+# 1. Global Start Command
 @router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: types.Message, state: FSMContext):
     await show_main_menu(message, state, set_reply_keyboard=True)
 
-# معالج عام لأزرار لوحة المفاتيح الثابتة (يُشغل قبل أي معالج FSM)
-@router.message(F.text)
+
+@router.message(F.text, F.chat.type == "private")
 async def handle_reply_buttons(message: types.Message, state: FSMContext):
+
+    # 2. Handle special button texts
     buttons = await get_all_buttons()
     button_map = {b['display_text']: b for b in buttons}
     if message.text in button_map:
@@ -120,32 +119,45 @@ async def handle_reply_buttons(message: types.Message, state: FSMContext):
         if key == 'main':
             await show_main_menu(message, state, set_reply_keyboard=True)
         elif key == 'help':
+            await state.clear()
             text = btn['description'] or "ℹ️ لم يتم تعيين نص المساعدة."
             if btn['image_file_id']:
                 await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
             else:
                 await message.answer(text, parse_mode="HTML")
         elif key == 'about':
+            await state.clear()
             text = btn['description'] or "ℹ️ لم يتم تعيين نص المعلومات."
             if btn['image_file_id']:
                 await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
             else:
                 await message.answer(text, parse_mode="HTML")
-      
-    # التحقق من زر الإعدادات (مثبت بشكل ثابت)
+        return
+
+    # 3. Handle Settings button
     if message.text == "⚙️ الإعدادات" and message.from_user.id == ADMIN_CHAT_ID:
         await show_settings_menu(message, state)
         return
 
-    # وإلا، نترك المعالجات التالية (بما في ذلك FSM) تتعامل معها
+    # 4. If there is an active FSM state, skip this handler so FSM handlers can process it
+    current_state = await state.get_state()
+    if current_state is not None:
+        return
 
-# معالج النافذة المنبثقة لحالة النظام غير الجاهز
+    # 5. No active state and not a button – fallback
+    await message.answer("عذراً، لم أفهم ما قلته. الرجاء استخدام الأزرار أدناه.")
+    await show_main_menu(
+        message,
+        state,
+        set_reply_keyboard=False,
+        user_id=message.from_user.id,
+        user_name=message.from_user.full_name
+    )
+# --- Callbacks remain the same ---
+
 @router.callback_query(F.data == "system_not_ready")
 async def system_not_ready_popup(callback: types.CallbackQuery):
-    await callback.answer(
-        "🛠 النظام قيد التحديث حاليًا. يرجى المحاولة لاحقًا.",
-        show_alert=True
-    )
+    await callback.answer("🛠 النظام قيد التحديث حالياً. يرجى المحاولة لاحقاً.", show_alert=True)
 
 @router.callback_query(F.data == "view_pending_request")
 async def view_pending_request(callback: types.CallbackQuery, state: FSMContext):
@@ -179,7 +191,6 @@ async def view_pending_request(callback: types.CallbackQuery, state: FSMContext)
 async def delete_pending_request(callback: types.CallbackQuery, state: FSMContext):
     req_id = callback.data.split(":")[1]
     user_id = callback.from_user.id
-    # التحقق من الملكية وحالة الطلب
     req = await db.fetchrow(
         "SELECT id FROM balance_requests WHERE id=$1 AND user_id=(SELECT id FROM users WHERE chat_id=$2) AND status='pending'",
         req_id, user_id
@@ -189,8 +200,6 @@ async def delete_pending_request(callback: types.CallbackQuery, state: FSMContex
         return
     
     await db.execute("DELETE FROM balance_requests WHERE id=$1", req_id)
-    
-    # عرض رسالة نجاح مع زر رجوع
     kb = InlineKeyboardBuilder()
     kb.row(types.InlineKeyboardButton(text="🔙 العودة إلى الرئيسية", callback_data="back_to_main"))
     await callback.message.edit_text("✅ تم حذف طلبك المعلق.", reply_markup=kb.as_markup())

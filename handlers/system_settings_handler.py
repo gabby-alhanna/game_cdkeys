@@ -32,7 +32,7 @@ async def get_code(message: types.Message, state: FSMContext):
         reply_markup=builder.as_markup()
     )
 
-@router.message(AdminEdit.waiting_qr, F.photo)
+@router.message(AdminEdit.waiting_qr, F.photo, F.text.not_in(SPECIAL_BUTTONS))
 async def get_qr(message: types.Message, state: FSMContext):
     data = await state.get_data()
     file_id = message.photo[-1].file_id

@@ -82,7 +82,7 @@ class DatabaseManager:
             id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             user_id UUID REFERENCES users(id),
             amount DECIMAL(15, 2) NOT NULL,
-            type TEXT CHECK (type IN ('charge', 'purchase')),
+            type TEXT CHECK (type IN ('charge', 'purchase', 'adjustment')),
             description TEXT,              
             created_at TIMESTAMP DEFAULT NOW()
         );

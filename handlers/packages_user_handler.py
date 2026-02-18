@@ -1,7 +1,9 @@
 from aiogram import Router, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
 from game_utils import get_packages, count_packages, get_game
 import html
+import logging
 
 router = Router()
 
@@ -57,26 +59,36 @@ async def show_packages_page(target, game_id: str, page: int):
         builder.row(*nav_row)
     builder.row(types.InlineKeyboardButton(text="🔙 العودة إلى الألعاب", callback_data="view_games"))
 
-    # إذا كانت اللعبة تحتوي على صورة، أرسل/حدّث مع الصورة
+    # محاولة إرسال الصورة إن وجدت
     if game.get('image_file_id'):
-        if is_callback:
-            # احذف الرسالة القديمة (نص) وأرسل صورة جديدة
-            await message.delete()
-            await message.answer_photo(
-                photo=game['image_file_id'],
-                caption=caption,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
-            )
-        else:
-            await message.answer_photo(
-                photo=game['image_file_id'],
-                caption=caption,
-                reply_markup=builder.as_markup(),
-                parse_mode="HTML"
-            )
+        try:
+            if is_callback:
+                # First, send the photo as a new message
+                await message.answer_photo(
+                    photo=game['image_file_id'],
+                    caption=caption,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+                # If successful, delete the original message
+                await message.delete()
+            else:
+                await message.answer_photo(
+                    photo=game['image_file_id'],
+                    caption=caption,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML"
+                )
+        except TelegramBadRequest as e:
+            logging.warning(f"فشل إرسال صورة اللعبة {game_id}: {e}")
+            # Photo failed – fallback to text
+            if is_callback:
+                # Original message still exists, edit it
+                await message.edit_text(caption, reply_markup=builder.as_markup(), parse_mode="HTML")
+            else:
+                await message.answer(caption, reply_markup=builder.as_markup(), parse_mode="HTML")
     else:
-        # لا توجد صورة – عدّل الرسالة النصية
+        # No image
         if is_callback:
             await message.edit_text(caption, reply_markup=builder.as_markup(), parse_mode="HTML")
         else:

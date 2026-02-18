@@ -114,29 +114,20 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(UserCharge.waiting_transfer_code)
     builder = get_cancel_button()
-    try:
-        await callback.message.answer_photo(
-            photo=config['superadmin_qr_file_id'],
-            caption=f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>رمز التحويل</b>:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
-    except TelegramBadRequest as e:
-        # إذا كان معرف الصورة غير صالح، نرسل رسالة نصية بدلاً من ذلك
-        logging.error(f"QR code file ID invalid: {e}")
-        await callback.message.answer(
-            f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\n"
-            f"⚠️ تعذر إرسال صورة رمز QR. يرجى إبلاغ المشرف.\n\n"
-            f"الخطوة 1: أرسل <b>رمز التحويل</b>:",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
+    await callback.message.answer_photo(
+        photo=config['superadmin_qr_file_id'],
+        caption=f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>رمز التحويل</b>:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
     await callback.message.delete()
     await callback.answer()
 
-
+    
 @router.message(UserCharge.waiting_transfer_code, F.text.not_in(SPECIAL_BUTTONS))
 async def user_code(message: types.Message, state: FSMContext):
+    print(SPECIAL_BUTTONS)
+    logging.info(f"User {message.from_user.id} sent transfer code: {message.text}")
     await state.update_data(t_code=message.text)
     await state.set_state(UserCharge.waiting_description)
     builder = get_cancel_button()
@@ -148,6 +139,7 @@ async def user_code(message: types.Message, state: FSMContext):
 
 @router.message(UserCharge.waiting_description, F.text.not_in(SPECIAL_BUTTONS))
 async def user_done(message: types.Message, state: FSMContext, bot):
+    logging.info(f"User {message.from_user.id} sent description: {message.text}")
     data = await state.get_data()
     user_uuid = await db.fetchval("SELECT id FROM users WHERE chat_id=$1", message.from_user.id)
     req_id = await db.fetchval(

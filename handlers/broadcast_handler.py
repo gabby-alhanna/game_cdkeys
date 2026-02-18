@@ -8,6 +8,7 @@ from .common_handlers import get_cancel_button
 import os
 import logging
 import asyncio
+from static_lists import SPECIAL_BUTTONS
 
 router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
@@ -33,7 +34,7 @@ async def cmd_broadcast(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-@router.message(Broadcast.waiting_text, F.text)
+@router.message(Broadcast.waiting_text, F.text.not_in(SPECIAL_BUTTONS))
 async def broadcast_get_text(message: types.Message, state: FSMContext):
     await state.update_data(text=message.html_text)  # تخزين النص بصيغة HTML
     await state.set_state(Broadcast.waiting_media)

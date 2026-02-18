@@ -104,7 +104,7 @@ async def add_game_name(message: types.Message, state: FSMContext):
     builder = get_cancel_button()
     await message.answer("🖼 أرسل **صورة** للعبة (أو أرسل '.' للتخطي):", reply_markup=builder.as_markup())
 
-@router.message(GameCreate.waiting_image, F.photo)
+@router.message(GameCreate.waiting_image, F.photo, F.text.not_in(SPECIAL_BUTTONS))
 async def add_game_image(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     await state.update_data(image_file_id=file_id)
@@ -112,7 +112,7 @@ async def add_game_image(message: types.Message, state: FSMContext):
     builder = get_cancel_button()
     await message.answer("📝 أرسل **وصفاً** للعبة (أو أرسل '.' للتخطي):", reply_markup=builder.as_markup())
 
-@router.message(GameCreate.waiting_image, F.text == ".")
+@router.message(GameCreate.waiting_image, F.text == ".", F.text.not_in(SPECIAL_BUTTONS))
 async def add_game_skip_image(message: types.Message, state: FSMContext):
     await state.update_data(image_file_id=None)
     await state.set_state(GameCreate.waiting_description)
@@ -170,7 +170,7 @@ async def edit_game_name(message: types.Message, state: FSMContext):
     builder = get_cancel_button()
     await message.answer("🖼 أرسل الصورة الجديدة (أو أرسل '.' للإبقاء):", reply_markup=builder.as_markup())
 
-@router.message(GameEdit.waiting_image, F.photo)
+@router.message(GameEdit.waiting_image, F.photo, F.text.not_in(SPECIAL_BUTTONS))
 async def edit_game_image(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     await state.update_data(new_image=file_id)
@@ -178,7 +178,7 @@ async def edit_game_image(message: types.Message, state: FSMContext):
     builder = get_cancel_button()
     await message.answer("📝 أرسل الوصف الجديد (أو أرسل '.' للإبقاء):", reply_markup=builder.as_markup())
 
-@router.message(GameEdit.waiting_image, F.text == ".")
+@router.message(GameEdit.waiting_image, F.text == ".", F.text.not_in(SPECIAL_BUTTONS))
 async def edit_game_skip_image(message: types.Message, state: FSMContext):
     await state.update_data(new_image=None)
     await state.set_state(GameEdit.waiting_description)
