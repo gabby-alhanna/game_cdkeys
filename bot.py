@@ -2,6 +2,7 @@ import asyncio
 import os
 import logging
 from dotenv import load_dotenv
+from aiohttp import web
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import Update
 from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
@@ -51,6 +52,12 @@ async def start_with_retry(bot, dp):
             logger.info(f"Retrying in {wait} seconds...")
             await asyncio.sleep(wait)
 
+# --- Health Check Logic ---
+async def handle_ping(request):
+    """Answers the Koyeb/UptimeRobot health check."""
+    return web.Response(text="Bot is active and polling!", status=200)
+
+
 async def main():
     bot = Bot(token=os.getenv("BOT_TOKEN"), timeout=30)
     dp = Dispatcher()
@@ -62,6 +69,11 @@ async def main():
 
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
+
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
 
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
