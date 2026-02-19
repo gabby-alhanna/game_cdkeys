@@ -2,9 +2,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import types
 from database import db
 
-GAME_PAGE_SIZE = 8
-PACKAGE_PAGE_SIZE = 3
-
 async def get_games(page: int = 0, only_active: bool = True, limit: int = None):
     """Fetch games with flexible pagination."""
     # إذا لم يتم تمرير limit، نستخدم PAGE_SIZE الافتراضية
@@ -27,17 +24,20 @@ async def count_games(only_active: bool = True):
 async def get_game(game_id: str):
     return await db.fetchrow("SELECT * FROM games WHERE id = $1", game_id)
 
-async def get_packages(game_id: str, page: int = 0):
-    offset = page * PACKAGE_PAGE_SIZE
+async def get_packages(game_id: str, page: int = 0, limit: int = None):
+    """جلب الحزم مع دعم التحديد الديناميكي للعدد."""
+    current_limit = limit if limit is not None else 4 # القيمة الافتراضية
+    offset = page * current_limit
+    
     return await db.fetch(
         """
         SELECT id, name, price 
         FROM game_packages 
         WHERE game_id = $1 
-        ORDER BY created_at ASC  -- الترتيب من الأقدم إلى الأحدث (ترتيب الإدخال)
+        ORDER BY created_at ASC
         LIMIT $2 OFFSET $3
         """,
-        game_id, PACKAGE_PAGE_SIZE, offset
+        game_id, current_limit, offset
     )
 
 async def count_packages(game_id: str):

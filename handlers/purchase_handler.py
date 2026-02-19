@@ -139,7 +139,7 @@ async def buy_package_start(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(PurchaseRequest.waiting_account_id)
     builder = get_cancel_button()
     await callback.message.answer(
-        "🎮 الرجاء إدخال **معرف حساب اللعبة** (الحساب الذي تريد تسليم اللعبة إليه):",
+        "🎮 ارسل معرفك داخل اللعبة",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
@@ -183,11 +183,11 @@ async def purchase_confirm_yes(callback: types.CallbackQuery, state: FSMContext,
     await callback.message.edit_text("✅ تم إرسال طلب الشراء إلى المشرف. سيتم إعلامك عند الموافقة.")
     
     # أزرار للمستخدم بعد الطلب
-    user_kb = InlineKeyboardBuilder()
-    user_kb.row(types.InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="charge_balance"))
-    user_kb.row(types.InlineKeyboardButton(text="📊 عرض الرصيد", callback_data="show_balance"))
-    await callback.message.answer("ماذا تريد أن تفعل بعد ذلك؟", reply_markup=user_kb.as_markup())
-
+    # user_kb = InlineKeyboardBuilder()
+    # user_kb.row(types.InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="charge_balance"))
+    # user_kb.row(types.InlineKeyboardButton(text="📊 عرض الرصيد", callback_data="show_balance"))
+    # await callback.message.answer("ماذا تريد أن تفعل بعد ذلك؟", reply_markup=user_kb.as_markup())
+    await callback.message.answer("قد تستغرق العملية يوم كامل كحد اقصى")
     # جلب تفاصيل الطلب كاملة للمشرف
     req_row = await db.fetchrow("""
         SELECT pr.id, pr.game_account_id, pr.price, pr.created_at,
@@ -356,7 +356,7 @@ async def purchase_approve(callback: types.CallbackQuery, bot):
         include_balance=False,
         status="approved"
     )
-    user_text += f"\n💳 <b>المبلغ المخصوم:</b> {req['price']} ل.س\n💳 <b>الرصيد الجديد:</b> {new_balance} ل.س\n\nسيقوم المشرف بتسليم اللعبة إلى حسابك قريباً."
+    user_text += f"\n💳 <b>المبلغ المخصوم:</b> {req['price']} ل.س\n💳 <b>الرصيد الجديد:</b> {new_balance} ل.س\n\nسيقوم المشرف بإداع المبلغ لحسابك في اللعبة"
     await bot.send_message(req['chat_id'], user_text, parse_mode="HTML")
     await callback.answer()
 

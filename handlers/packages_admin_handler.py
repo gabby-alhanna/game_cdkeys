@@ -29,7 +29,7 @@ class PackageEdit(StatesGroup):
     waiting_price = State()
 
 async def show_game_details_with_packages(target, game_id: str, page: int = 0):
-    """عرض تفاصيل اللعبة + قائمة الحزم مع أزرار الإدارة."""
+    """عرض تفاصيل اللعبة + قائمة الحزم مع أزرار الإدارة بتنسيق متوافق مع RTL."""
     if isinstance(target, types.CallbackQuery):
         message = target.message
         is_callback = True
@@ -39,97 +39,113 @@ async def show_game_details_with_packages(target, game_id: str, page: int = 0):
 
     game = await get_game(game_id)
     if not game:
-        await message.answer("اللعبة غير موجودة.")
+        await message.answer("⚠️ اللعبة غير موجودة في قاعدة البيانات.")
         return
 
-    packages = await get_packages(game_id, page)
-    total = await count_packages(game_id)
-    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+    # استخدام نفس المنطق المرن (8-12) لضمان تناسق العرض
+    total_count = await count_packages(game_id)
+    MAX_SINGLE_PAGE = 12
+    DEFAULT_PAGE_SIZE = 8
 
-    # بناء نص معلومات اللعبة
-    game_text = f"🎮 **{game['name']}**\n"
-    if game.get('description'):
-        game_text += f"📝 {escape_html(game['description'])}\n"
-    game_text += "\n"
-
-    # قسم الحزم
-    if not packages:
-        packages_text = "لا توجد حزم بعد."
+    if total_count <= MAX_SINGLE_PAGE:
+        packages = await get_packages(game_id, 0, limit=total_count)
+        total_pages = 1
+        current_page = 0
     else:
-        packages_text = "**الحزم:**\n"
-        for p in packages:
-            packages_text += f"• {p['name']} – {p['price']} ل.س\n"
+        packages = await get_packages(game_id, page, limit=DEFAULT_PAGE_SIZE)
+        total_pages = (total_count + DEFAULT_PAGE_SIZE - 1) // DEFAULT_PAGE_SIZE
+        current_page = page
 
-    full_text = game_text + packages_text
+    # --- بناء الـ Caption بنفس أسلوب واجهة المستخدم (التصميم الموحد) ---
+    caption_lines = [
+        f"⚙️ <b>لوحة إدارة: {escape_html(game['name'])}</b>",
+        f"<i>{escape_html(game.get('description', 'لا يوجد وصف متاح'))}</i>",
+        "────────────────"
+    ]
+    
+    caption_lines.append("📦 <b>الحزم المضافة حالياً:</b>\n")
 
+    if not packages:
+        caption_lines.append("<i>لا توجد حزم مضافة لهذه اللعبة.</i>")
+    else:
+        for i, p in enumerate(packages, 1):
+            # تنسيق يمنع تداخل الأقواس (اسم الحزمة ثم السعر في سطر مستقل)
+            item_text = f"{i} - <b>{escape_html(p['name'])}</b>"
+            price_text = f"💰 السعر الحالي: <code>{p['price']}</code> ل.س"
+            
+            caption_lines.append(item_text)
+            caption_lines.append(price_text)
+            caption_lines.append("") # فواصل بصرية
+
+    caption_lines.append("🛠 <b>خيارات التحكم:</b>")
+    full_text = "\n".join(caption_lines)
+
+    # --- بناء لوحة التحكم (Keyboard) ---
     builder = InlineKeyboardBuilder()
-    # أزرار تعديل/حذف اللعبة – بادئات قصيرة
+    
+    # 1. أزرار التحكم باللعبة الأساسية
     builder.row(
-        types.InlineKeyboardButton(text="✏️ تعديل اللعبة", callback_data=f"ge:{game_id}"),
+        types.InlineKeyboardButton(text="✏️ تعديل اسم/وصف", callback_data=f"ge:{game_id}"),
         types.InlineKeyboardButton(text="❌ حذف اللعبة", callback_data=f"gd:{game_id}")
     )
-    # صفوف الحزم مع أزرار قصيرة
+
+    # 2. أزرار إدارة الحزم (تنسيق صفوف للإدارة لتسهيل الضغط)
     for p in packages:
         builder.row(
-            types.InlineKeyboardButton(text=p['name'], callback_data=f"pv:{p['id']}"),
-            types.InlineKeyboardButton(text="✏️ تعديل", callback_data=f"pe:{p['id']}"),
-            types.InlineKeyboardButton(text="❌ حذف", callback_data=f"pd:{p['id']}")
+            types.InlineKeyboardButton(text=f"📦 {p['name']}", callback_data=f"pv:{p['id']}"),
+            types.InlineKeyboardButton(text="✏️", callback_data=f"pe:{p['id']}"),
+            types.InlineKeyboardButton(text="🗑", callback_data=f"pd:{p['id']}")
         )
-    # أزرار التنقل بين الصفحات
+
+    # 3. أزرار التنقل (Pagination)
     if total_pages > 1:
-        nav_row = []
-        if page > 0:
-            nav_row.append(types.InlineKeyboardButton(text="◀️", callback_data=f"pp:{game_id}:{page-1}"))
-        nav_row.append(types.InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="ignore"))
-        if page < total_pages-1:
-            nav_row.append(types.InlineKeyboardButton(text="▶️", callback_data=f"pp:{game_id}:{page+1}"))
-        builder.row(*nav_row)
-    # أزرار الإجراءات
-    builder.row(types.InlineKeyboardButton(text="➕ إضافة حزمة", callback_data=f"pa:{game_id}"))
-    builder.row(types.InlineKeyboardButton(text="🔙 العودة إلى الألعاب", callback_data="admin_games_page:0"))
-
-    # إذا كانت هناك صورة، أرسل/حدّث مع الصورة
-    if game.get('image_file_id'):
-        try:
-            if is_callback:
-                # Try to send the photo as a new message first
-                await message.answer_photo(
-                    photo=game['image_file_id'],
-                    caption=full_text,
-                    reply_markup=builder.as_markup()
-                )
-                # If successful, delete the original message
-                await message.delete()
-            else:
-                await message.answer_photo(
-                    photo=game['image_file_id'],
-                    caption=full_text,
-                    reply_markup=builder.as_markup()
-                )
-        except Exception as e:
-            logging.warning(f"فشل إرسال صورة اللعبة {game_id}: {e}")
-            # Photo failed – fall back to text
-            if is_callback:
-                # Original message still exists, edit it to text
-                if message.photo:
-                    # Current message is a photo – delete and send new text
-                    await message.delete()
-                    await message.answer(full_text, reply_markup=builder.as_markup())
-                else:
-                    await message.edit_text(full_text, reply_markup=builder.as_markup())
-            else:
-                await message.answer(full_text, reply_markup=builder.as_markup())
-    else:
-        # No image
-        if is_callback:
-            if message.photo:
-                await message.delete()
-                await message.answer(full_text, reply_markup=builder.as_markup())
-            else:
-                await message.edit_text(full_text, reply_markup=builder.as_markup())
+        nav_buttons = []
+        if current_page > 0:
+            nav_buttons.append(types.InlineKeyboardButton(text="◀️", callback_data=f"pp:{game_id}:{current_page-1}"))
         else:
-            await message.answer(full_text, reply_markup=builder.as_markup())
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
 
+        nav_buttons.append(types.InlineKeyboardButton(text=f"{current_page+1}/{total_pages}", callback_data="ignore"))
+
+        if current_page < total_pages - 1:
+            nav_buttons.append(types.InlineKeyboardButton(text="▶️", callback_data=f"pp:{game_id}:{current_page+1}"))
+        else:
+            nav_buttons.append(types.InlineKeyboardButton(text=" ", callback_data="ignore"))
+        
+        builder.row(*nav_buttons)
+
+    # 4. أزرار الإجراءات الإضافية
+    builder.row(types.InlineKeyboardButton(text="➕ إضافة حزمة جديدة", callback_data=f"pa:{game_id}"))
+    builder.row(types.InlineKeyboardButton(text="🔙 العودة لقائمة الألعاب", callback_data="admin_games_page:0"))
+
+    reply_markup = builder.as_markup()
+
+    # --- معالجة الإرسال (صورة أو نص) ---
+    image_id = game.get('image_file_id')
+    try:
+        if image_id:
+            if is_callback:
+                await message.delete() # حذف القديم لضمان تحديث الصورة والكابشن
+            
+            await message.answer_photo(
+                photo=image_id,
+                caption=full_text,
+                reply_markup=reply_markup,
+                parse_mode="HTML"
+            )
+        else:
+            if is_callback:
+                if message.photo:
+                    await message.delete()
+                    await message.answer(full_text, reply_markup=reply_markup, parse_mode="HTML")
+                else:
+                    await message.edit_text(full_text, reply_markup=reply_markup, parse_mode="HTML")
+            else:
+                await message.answer(full_text, reply_markup=reply_markup, parse_mode="HTML")
+                
+    except Exception as e:
+        logging.error(f"Error in Admin View: {e}")
+        await message.answer(full_text, reply_markup=reply_markup, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("pp:"))
 async def packages_page(callback: types.CallbackQuery):

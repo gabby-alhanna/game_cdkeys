@@ -3,7 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from .common_handlers import get_cancel_button
-from game_utils import get_games, count_games, get_game, pagination_keyboard, GAME_PAGE_SIZE
+from game_utils import get_games, count_games, get_game, pagination_keyboard
 from database import db
 from static_lists import SPECIAL_BUTTONS
 import os
