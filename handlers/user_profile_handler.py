@@ -9,6 +9,9 @@ from .common_handlers import get_cancel_button
 from static_lists import SPECIAL_BUTTONS
 from decimal import Decimal, InvalidOperation
 import logging
+import tempfile
+import csv
+from aiogram.types import FSInputFile
 
 router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
@@ -30,6 +33,7 @@ class AdminViewUser(StatesGroup):
 async def admin_user_management(callback: types.CallbackQuery):
     """Show submenu for user management."""
     builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📋 عرض كل المستخدمين", callback_data="admin_list_users"))
     builder.row(types.InlineKeyboardButton(text="👤 عرض حساب مستخدم", callback_data="admin_view_user"))
     builder.row(types.InlineKeyboardButton(text="💰 تعديل رصيد مستخدم", callback_data="admin_adjust_balance"))
     builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_back_to_main"))
@@ -342,3 +346,132 @@ async def admin_adjust_start_with_id(callback: types.CallbackQuery, state: FSMCo
     builder.row(types.InlineKeyboardButton(text="❌ إلغاء", callback_data="cancel_action"))
     await callback.message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await callback.answer()
+
+PAGE_SIZE = 5 
+@router.callback_query(F.data == "admin_list_users")
+async def admin_list_users(callback: types.CallbackQuery):
+    total = await db.fetchval("SELECT COUNT(*) FROM users")
+    # 1. Send full list (text or file)
+    if total < 10:
+        full_text = await generate_full_users_text(callback.bot)
+        await callback.message.answer(full_text, parse_mode="HTML")
+    else:
+        # Generate a temporary file
+        full_text = await generate_full_users_text(callback.bot)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(full_text)
+            tmp_path = f.name
+        await callback.message.answer_document(
+            document=FSInputFile(tmp_path, filename="users_list.txt"),
+            caption=f"إجمالي المستخدمين: {total}"
+        )
+        # Clean up
+        import os
+        os.unlink(tmp_path)
+
+    # 2. Send paginated interactive list
+    await show_users_page(callback, bot=callback.bot, page=0)
+
+async def show_users_page(target, bot, page: int):
+    """Display users list with pagination, fetching usernames live."""
+    if isinstance(target, types.CallbackQuery):
+        message = target.message
+        is_callback = True
+    else:
+        message = target
+        is_callback = False
+
+    offset = page * PAGE_SIZE
+    users = await db.fetch("""
+        SELECT chat_id, full_name, balance, created_at
+        FROM users
+        ORDER BY created_at DESC
+        LIMIT $1 OFFSET $2
+    """, PAGE_SIZE, offset)
+
+    total = await db.fetchval("SELECT COUNT(*) FROM users")
+    total_pages = (total + PAGE_SIZE - 1) // PAGE_SIZE
+
+    if not users:
+        text = "لا يوجد مستخدمين بعد."
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_user_management"))
+        if is_callback:
+            await message.edit_text(text, reply_markup=builder.as_markup())
+        else:
+            await message.answer(text, reply_markup=builder.as_markup())
+        return
+
+    # Build message text with live usernames
+    lines = [f"📋 **قائمة المستخدمين (صفحة {page+1}/{total_pages})**\n"]
+    for u in users:
+        # Try to get username from Telegram
+        try:
+            chat = await bot.get_chat(u['chat_id'])
+            username_display = f"@{chat.username}" if chat.username else "—"
+        except:
+            username_display = "—"
+
+        created = u['created_at'].strftime('%Y-%m-%d') if u['created_at'] else "—"
+        lines.append(
+            f"🆔 <code>{u['chat_id']}</code> | {username_display}\n"
+            f"👤 {escape_html(u['full_name'])}\n"
+            f"💰 {u['balance']} ل.س | 📅 {created}\n"
+        )
+    text = "\n".join(lines)
+
+    builder = InlineKeyboardBuilder()
+    # User buttons – each opens admin_user_info
+    for u in users:
+        display_name = u['full_name'][:20] + "..." if len(u['full_name']) > 20 else u['full_name']
+        builder.row(types.InlineKeyboardButton(
+            text=display_name,
+            callback_data=f"admin_user_info:{u['chat_id']}"
+        ))
+
+    # Pagination buttons
+    if total_pages > 1:
+        nav_row = []
+        if page > 0:
+            nav_row.append(types.InlineKeyboardButton(text="◀️", callback_data=f"admin_users_page:{page-1}"))
+        nav_row.append(types.InlineKeyboardButton(text=f"{page+1}/{total_pages}", callback_data="ignore"))
+        if page < total_pages-1:
+            nav_row.append(types.InlineKeyboardButton(text="▶️", callback_data=f"admin_users_page:{page+1}"))
+        builder.row(*nav_row)
+
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="admin_user_management"))
+
+    # if is_callback:
+    #     await message.edit_text(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    # else:
+    #     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    if is_callback:
+        await message.delete()
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        
+@router.callback_query(F.data.startswith("admin_users_page:"))
+async def admin_users_page(callback: types.CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    await show_users_page(callback, bot=callback.bot, page=int(page))
+    await callback.answer()
+
+async def generate_full_users_text(bot) -> str:
+    """Generate a text report of all users with live usernames."""
+    users = await db.fetch("SELECT chat_id, full_name, balance, created_at FROM users ORDER BY created_at DESC")
+    lines = [f"إجمالي المستخدمين: {len(users)}\n", "="*50 + "\n"]
+    for u in users:
+        try:
+            chat = await bot.get_chat(u['chat_id'])
+            username = f"@{chat.username}" if chat.username else "—"
+        except:
+            username = "—"
+        created = u['created_at'].strftime('%Y-%m-%d %H:%M') if u['created_at'] else "—"
+        lines.append(
+            f"ID: {u['chat_id']} | {username}\n"
+            f"الاسم: {u['full_name']}\n"
+            f"الرصيد: {u['balance']} ل.س\n"
+            f"تاريخ الانضمام: {created}\n"
+            + "-"*40 + "\n"
+        )
+    return "\n".join(lines)
+

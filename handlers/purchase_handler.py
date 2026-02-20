@@ -187,7 +187,7 @@ async def purchase_confirm_yes(callback: types.CallbackQuery, state: FSMContext,
     # user_kb.row(types.InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="charge_balance"))
     # user_kb.row(types.InlineKeyboardButton(text="📊 عرض الرصيد", callback_data="show_balance"))
     # await callback.message.answer("ماذا تريد أن تفعل بعد ذلك؟", reply_markup=user_kb.as_markup())
-    await callback.message.answer("قد تستغرق العملية يوم كامل كحد اقصى")
+    await callback.message.answer("قد تستغرق العملية من نصف ساعة لساعة")
     # جلب تفاصيل الطلب كاملة للمشرف
     req_row = await db.fetchrow("""
         SELECT pr.id, pr.game_account_id, pr.price, pr.created_at,

@@ -9,21 +9,56 @@ from aiogram.exceptions import TelegramNetworkError, TelegramRetryAfter
 from handlers import all_routers
 from database import db
 from static_lists import load_special_buttons, SPECIAL_BUTTONS
+from middleware.force_join import ForceJoinMiddleware
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# class TypingMiddleware(BaseMiddleware):
+#     async def __call__(self, handler, event: Update, data: dict):
+#         if event.message:
+#             chat_id = event.message.from_user.id
+#         elif event.callback_query:
+#             chat_id = event.callback_query.from_user.id
+#         else:
+#             return await handler(event, data)
+#         await data['bot'].send_chat_action(chat_id=chat_id, action="typing")
+#         return await handler(event, data)
+
 class TypingMiddleware(BaseMiddleware):
     async def __call__(self, handler, event: Update, data: dict):
         if event.message:
-            chat_id = event.message.from_user.id
+            # Only show typing for new messages, not for callbacks
+            await data['bot'].send_chat_action(chat_id=event.message.from_user.id, action="typing")
+        return await handler(event, data)
+
+class UsernameRequiredMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event: Update, data: dict):
+        # Extract user from update
+        user = None
+        if event.message:
+            user = event.message.from_user
         elif event.callback_query:
-            chat_id = event.callback_query.from_user.id
+            user = event.callback_query.from_user
         else:
             return await handler(event, data)
-        await data['bot'].send_chat_action(chat_id=chat_id, action="typing")
+
+        # If user has no username, block
+        if not user.username:
+            text = (
+                "⚠️ للوصول إلى البوت، يجب أن يكون لديك اسم مستخدم (Username) في Telegram.\n"
+                "الرجاء تعيين اسم مستخدم من الإعدادات ثم حاول مرة أخرى."
+            )
+            if event.message:
+                await event.message.answer(text)
+            elif event.callback_query:
+                await event.callback_query.message.answer(text)
+                await event.callback_query.answer()
+            return  # Stop propagation – user is blocked
+
+        # Username exists, continue
         return await handler(event, data)
 
 async def on_startup():
@@ -62,7 +97,8 @@ async def main():
     bot = Bot(token=os.getenv("BOT_TOKEN"), timeout=30)
     dp = Dispatcher()
 
-    dp.update.middleware(TypingMiddleware())
+    dp.update.middleware(ForceJoinMiddleware())   # first
+    dp.update.middleware(TypingMiddleware())      # second
 
     for router in all_routers:
         dp.include_router(router)
