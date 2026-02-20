@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 import os
 import html
 import logging
-
+from .referral_handler import get_referral_count
 router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
 
@@ -431,6 +431,7 @@ async def admin_user_info(callback: types.CallbackQuery, bot):
         tx_lines.append(line)
     tx_text = "\n".join(tx_lines) if tx_lines else "لا توجد عمليات بعد."
 
+    ref_count = await get_referral_count(user['id'])
     text = (
         f"👤 **ملف المستخدم**\n\n"
         f"ID: <code>{user['chat_id']}</code>\n"
@@ -438,6 +439,7 @@ async def admin_user_info(callback: types.CallbackQuery, bot):
         f"اسم المستخدم: {escape_html(username_display)}\n"
         f"الرصيد: {user['balance']} ل.س\n"
         f"تاريخ الانضمام: {user['created_at'].strftime('%Y-%m-%d') if user.get('created_at') else 'غير معروف'}\n\n"
+        f"عدد المدعوين: {ref_count}\n\n"
         f"**آخر العمليات:**\n{tx_text}"
     )
     await callback.message.answer(text, parse_mode="HTML")

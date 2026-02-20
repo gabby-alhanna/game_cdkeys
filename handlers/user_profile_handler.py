@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 import logging
 import tempfile
 import csv
+from .referral_handler import get_referral_count
 from aiogram.types import FSInputFile
 
 router = Router()
@@ -27,7 +28,6 @@ class AdminBalanceAdjust(StatesGroup):
 
 class AdminViewUser(StatesGroup):
     waiting_chat_id = State()
-
 
 @router.callback_query(F.data == "admin_user_management")
 async def admin_user_management(callback: types.CallbackQuery):
@@ -220,12 +220,14 @@ async def admin_user_info(callback: types.CallbackQuery):
         tx_lines.append(line)
     tx_text = "\n".join(tx_lines) if tx_lines else "لا توجد عمليات بعد."
 
+    ref_count = await get_referral_count(user['id'])
     text = (
         f"👤 **ملف المستخدم**\n\n"
         f"ID: <code>{user['chat_id']}</code>\n"
         f"الاسم: {escape_html(user['full_name'])}\n"
         f"الرصيد: {user['balance']} ل.س\n"
-        f"تاريخ الانضمام: {user['created_at'].strftime('%Y-%m-%d') if user.get('created_at') else 'غير معروف'}\n\n"
+        f"تاريخ الانضمام: {user['created_at'].strftime('%Y-%m-%d') if user.get('created_at') else 'غير معروف'}\n"
+        f"عدد المدعوين: {ref_count}\n\n"
         f"**آخر العمليات:**\n{tx_text}"
     )
     await callback.message.answer(text, parse_mode="HTML")
@@ -289,12 +291,14 @@ async def admin_view_user_chat_id(message: types.Message, state: FSMContext):
         tx_lines.append(line)
     tx_text = "\n".join(tx_lines) if tx_lines else "لا توجد عمليات بعد."
 
+    ref_count = await get_referral_count(user['id'])
     text = (
         f"👤 **ملف المستخدم**\n\n"
         f"ID: <code>{user['chat_id']}</code>\n"
         f"الاسم: {escape_html(user['full_name'])}\n"
         f"الرصيد: {user['balance']} ل.س\n"
-        f"تاريخ الانضمام: {user['created_at'].strftime('%Y-%m-%d') if user.get('created_at') else 'غير معروف'}\n\n"
+        f"تاريخ الانضمام: {user['created_at'].strftime('%Y-%m-%d') if user.get('created_at') else 'غير معروف'}\n"
+        f"عدد المدعوين: {ref_count}\n\n"
         f"**آخر العمليات:**\n{tx_text}"
     )
 
@@ -457,7 +461,7 @@ async def admin_users_page(callback: types.CallbackQuery):
 
 async def generate_full_users_text(bot) -> str:
     """Generate a text report of all users with live usernames."""
-    users = await db.fetch("SELECT chat_id, full_name, balance, created_at FROM users ORDER BY created_at DESC")
+    users = await db.fetch("SELECT id, chat_id, full_name, balance, created_at FROM users ORDER BY created_at DESC")
     lines = [f"إجمالي المستخدمين: {len(users)}\n", "="*50 + "\n"]
     for u in users:
         try:
@@ -466,11 +470,13 @@ async def generate_full_users_text(bot) -> str:
         except:
             username = "—"
         created = u['created_at'].strftime('%Y-%m-%d %H:%M') if u['created_at'] else "—"
+        ref_count = await get_referral_count(u['id'])
         lines.append(
             f"ID: {u['chat_id']} | {username}\n"
             f"الاسم: {u['full_name']}\n"
             f"الرصيد: {u['balance']} ل.س\n"
             f"تاريخ الانضمام: {created}\n"
+            f"عدد المدعوين: {ref_count}\n"
             + "-"*40 + "\n"
         )
     return "\n".join(lines)

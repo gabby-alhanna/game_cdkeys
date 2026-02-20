@@ -36,6 +36,7 @@ class DatabaseManager:
             id SERIAL PRIMARY KEY,
             superadmin_shamcash_code TEXT,
             superadmin_qr_file_id TEXT, 
+            referral_milestone INTEGER DEFAULT 15,
             last_updated TIMESTAMP DEFAULT NOW()
         );
 
@@ -106,13 +107,26 @@ class DatabaseManager:
             status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
             created_at TIMESTAMP DEFAULT NOW()
         );
+        CREATE TABLE IF NOT EXISTS referral_links (
+            user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            code TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS referrals (
+            id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+            inviter_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            invited_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE, -- one invite per user
+            created_at TIMESTAMP DEFAULT NOW()
+        );
         """
+        
         async with self.pool.acquire() as conn:
             await conn.execute(setup_query)
             # Seed system settings if empty
             if not await conn.fetchval("SELECT 1 FROM system_settings WHERE id = 1"):
                 await conn.execute("INSERT INTO system_settings (id) VALUES (1)")
-        
+            await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS referral_milestone INTEGER DEFAULT 15")
         count = await self.fetchval("SELECT COUNT(*) FROM reply_buttons")
         if count == 0:
             defaults = [

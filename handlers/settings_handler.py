@@ -18,17 +18,46 @@ class EditButton(StatesGroup):
     waiting_description = State()
 
 async def show_settings_menu(message: types.Message, state: FSMContext = None):
+    """Main admin settings menu."""
     if state:
         await state.clear()
     builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔘 تعديل الأزرار", callback_data="admin_edit_buttons"))
+    builder.row(types.InlineKeyboardButton(text="🎁 إعدادات الإحالة", callback_data="admin_referral_settings"))
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="settings_back"))
+    await message.answer(
+        "⚙️ **الإعدادات**\nاختر القسم الذي تريد تعديله:",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+@router.callback_query(F.data == "admin_edit_buttons")
+async def admin_edit_buttons(callback: types.CallbackQuery):
+    """Show list of reply buttons to edit."""
     buttons = await get_all_buttons()
+    if not buttons:
+        await callback.message.edit_text("لا توجد أزرار.")
+        return
+    builder = InlineKeyboardBuilder()
     for btn in buttons:
         builder.row(types.InlineKeyboardButton(
-            text=f"تعديل {btn['display_text']}",
+            text=f"✏️ {btn['display_text']}",
             callback_data=f"reply-buttons-edit_{btn['button_key']}"
         ))
-    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="settings_back"))
-    await message.answer("⚙️ **الإعدادات** – اختر زراً لتعديله:", reply_markup=builder.as_markup(), parse_mode="HTML")
+    builder.row(types.InlineKeyboardButton(text="🔙 رجوع", callback_data="settings_main"))
+    await callback.message.edit_text(
+        "📋 **اختر الزر الذي تريد تعديله:**",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "settings_main")
+async def settings_main(callback: types.CallbackQuery, state: FSMContext):
+    """Return to main settings menu."""
+    await show_settings_menu(callback.message, state)
+    await callback.message.delete()
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("reply-buttons-edit_"))
 async def start_edit(callback: types.CallbackQuery, state: FSMContext):

@@ -7,12 +7,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database_methods import get_or_create_user, is_system_ready
 from reply_buttons import get_all_buttons, build_reply_keyboard
 from .settings_handler import show_settings_menu
+from .referral_handler import process_referral
 from database import db
 from decimal import Decimal
 
 router = Router()
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
-
+    
 def escape_html(text):
     return html.escape(str(text) if text is not None else "")
 
@@ -97,6 +98,7 @@ async def show_main_menu(
             
             builder.row(types.InlineKeyboardButton(text="تصفح الألعاب", callback_data="view_games"))
             builder.row(types.InlineKeyboardButton(text="سجل العمليات", callback_data="view_history"))
+            builder.row(types.InlineKeyboardButton(text="🎁 الإحالات", callback_data="referral_menu"))
 
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
 
@@ -104,6 +106,10 @@ async def show_main_menu(
 # 1. Global Start Command
 @router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: types.Message, state: FSMContext):
+    args = message.text.split()
+    if len(args) > 1:
+        code = args[1]
+        await process_referral(message.from_user.id, code, message.bot)
     await show_main_menu(message, state, set_reply_keyboard=True)
 
 

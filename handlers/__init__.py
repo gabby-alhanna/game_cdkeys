@@ -11,6 +11,7 @@ from . import (
     purchase_handler,
     user_profile_handler,
     broadcast_handler,
+    referral_handler,
     commands_handler,
 )
 
@@ -28,5 +29,6 @@ all_routers = [
     purchase_handler.router,
     user_profile_handler.router,
     broadcast_handler.router,
+    referral_handler.router,
     commands_handler.router,
 ]
