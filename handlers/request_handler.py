@@ -19,13 +19,16 @@ ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
 # المفتاح: chat_id المشرف، القيمة: قائمة معرفات الرسائل
 _last_request_messages = {}
 
+class AdminAccept(StatesGroup):
+    waiting_amount = State()
+
 class UserCharge(StatesGroup):
-    waiting_transfer_code = State()
-    waiting_description = State()
-    waiting_amount = State()  # للمشرف
+    waiting_name = State()               # 1. الاسم في ShamCash
+    waiting_amount = State()              # 2. المبلغ
+    waiting_transfer_code = State()       # 3. رمز التحويل
+    waiting_confirmation = State()        # 4. التأكيد
 
 async def get_username_display(bot, user_id: int, full_name: str) -> str:
-    """الحصول على اسم المستخدم مع @ إن وجد، وإلا الاسم الكامل."""
     try:
         chat = await bot.get_chat(user_id)
         if chat.username:
@@ -33,6 +36,7 @@ async def get_username_display(bot, user_id: int, full_name: str) -> str:
     except:
         pass
     return full_name
+
 
 async def format_balance_request(
     data: dict,
@@ -45,6 +49,7 @@ async def format_balance_request(
 ) -> str:
     """تنسيق تفاصيل طلب شحن الرصيد في رسالة HTML متسقة."""
     lines = []
+    lines.append(f"#طلب_شحن_رصيد\n\n")
     if include_request_id and data.get('id'):
         lines.append(f"🆔 <b>رقم الطلب:</b> <code>{escape_html(data['id'])}</code>")
     
@@ -59,7 +64,7 @@ async def format_balance_request(
         lines.append(f"🔑 <b>رمز التحويل:</b> <code>{escape_html(data['transfer_code'])}</code>")
     
     if 'description' in data:
-        lines.append(f"📝 <b>الوصف:</b> {escape_html(data['description'] or '—')}")
+        lines.append(f"📝 <b>الوصف:</b>\n{escape_html(data['description'] or '—')}")
     
     if 'amount' in data:
         lines.append(f"💰 <b>المبلغ المضاف:</b> {data['amount']} ل.س")
@@ -98,13 +103,11 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     if not ready:
         return await callback.answer("⚠️ النظام غير متاح حالياً.", show_alert=True)
 
-    # التحقق من وجود رمز QR صالح
     if not config.get('superadmin_qr_file_id'):
         await callback.message.answer("❌ لم يتم تعيين رمز QR للشحن بعد. يرجى إبلاغ المشرف.")
         await callback.answer()
         return
 
-    # التحقق من وجود طلب معلق
     pending = await db.fetchval(
         "SELECT 1 FROM balance_requests WHERE user_id=(SELECT id FROM users WHERE chat_id=$1) AND status='pending'",
         callback.from_user.id
@@ -112,10 +115,10 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     if pending:
         return await callback.answer("🚫 لديك طلب معلق بالفعل.", show_alert=True)
 
-    await state.set_state(UserCharge.waiting_transfer_code)
+    # نرسل رسالة QR ولكننا لا نطلب رمز التحويل الآن
+    await state.set_state(UserCharge.waiting_name)
     builder = get_cancel_button()
-    caption = f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>رمز التحويل</b>:"
-
+    caption = f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>الاسم كما يظهر في ShamCash</b>:"
     try:
         await callback.message.answer_photo(
             photo=config['superadmin_qr_file_id'],
@@ -125,48 +128,107 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
         )
     except Exception as e:
         logging.error(f"فشل إرسال صورة QR: {e}")
-        # Fallback to text only
-        await callback.message.answer(
-            caption,
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML"
-        )
+        await callback.message.answer(caption, reply_markup=builder.as_markup(), parse_mode="HTML")
 
     await callback.message.delete()
     await callback.answer()
 
-@router.message(UserCharge.waiting_transfer_code, F.text.not_in(SPECIAL_BUTTONS))
-async def user_code(message: types.Message, state: FSMContext):
-    print(SPECIAL_BUTTONS)
-    logging.info(f"User {message.from_user.id} sent transfer code: {message.text}")
-    await state.update_data(t_code=message.text)
-    await state.set_state(UserCharge.waiting_description)
+# -------------------------------------------------------------------
+# 1. استقبال الاسم
+# -------------------------------------------------------------------
+@router.message(UserCharge.waiting_name, F.text.not_in(SPECIAL_BUTTONS))
+async def user_name(message: types.Message, state: FSMContext):
+    name = message.text.strip()
+    if not name:
+        await message.answer("❌ الاسم لا يمكن أن يكون فارغاً.")
+        return
+    await state.update_data(name=name)
+    await state.set_state(UserCharge.waiting_amount)
     builder = get_cancel_button()
     await message.answer(
-        "📝 الخطوة 2: أرسل <b>وصفاً</b> مختصراً (أو أرسل '.' للتخطي):",
+        "💰 الخطوة 2: أرسل <b>المبلغ المحول</b> (بالليرة السورية، رقم فقط):",
         reply_markup=builder.as_markup(),
         parse_mode="HTML"
     )
 
-@router.message(UserCharge.waiting_description, F.text.not_in(SPECIAL_BUTTONS))
-async def user_done(message: types.Message, state: FSMContext, bot):
-    logging.info(f"User {message.from_user.id} sent description: {message.text}")
+# -------------------------------------------------------------------
+# 2. استقبال المبلغ
+# -------------------------------------------------------------------
+@router.message(UserCharge.waiting_amount, F.text.not_in(SPECIAL_BUTTONS))
+async def user_amount(message: types.Message, state: FSMContext):
+    builder = get_cancel_button()
+    try:
+        amount = Decimal(message.text)
+        if amount <= 0:
+            raise ValueError
+    except (InvalidOperation, ValueError):
+        await message.answer("❌ الرجاء إدخال رقم موجب صحيح.", reply_markup=builder.as_markup())
+        return
+    await state.update_data(amount=amount)
+    await state.set_state(UserCharge.waiting_transfer_code)
+    await message.answer(
+        "🔑 الخطوة 3: أرسل <b>رمز التحويل</b> (أرقام فقط):",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
+    )
+
+# -------------------------------------------------------------------
+# 3. استقبال رمز التحويل (يجب أن يكون أرقاماً)
+# -------------------------------------------------------------------
+@router.message(UserCharge.waiting_transfer_code, F.text.not_in(SPECIAL_BUTTONS))
+async def user_code(message: types.Message, state: FSMContext):
+    builder = get_cancel_button()
+    code = message.text.strip()
+    if not code.isdigit():
+        await message.answer("❌ رمز التحويل يجب أن يتكون من أرقام فقط. حاول مرة أخرى.", reply_markup=builder.as_markup())
+        return
+    await state.update_data(transfer_code=code)
     data = await state.get_data()
-    user_uuid = await db.fetchval("SELECT id FROM users WHERE chat_id=$1", message.from_user.id)
+    # بناء رسالة التأكيد
+    description = (
+        f"الاسم: {data['name']}\n"
+        f"المبلغ المحول: {data['amount']} ل.س\n"
+        f"رمز التحويل: {data['transfer_code']}"
+    )
+    text = (
+        f"📝 **تأكيد طلب الشحن**\n\n"
+        f"{description}\n\n"
+        f"هل البيانات صحيحة؟"
+    )
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ تأكيد", callback_data="confirm_charge"),
+        types.InlineKeyboardButton(text="❌ حذف", callback_data="cancel_charge")
+    )
+    await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.set_state(UserCharge.waiting_confirmation)
+
+# -------------------------------------------------------------------
+# 4. تأكيد الطلب وإرساله للمشرف
+# -------------------------------------------------------------------
+@router.callback_query(UserCharge.waiting_confirmation, F.data == "confirm_charge")
+async def confirm_charge(callback: types.CallbackQuery, state: FSMContext, bot):
+    data = await state.get_data()
+    user_uuid = await db.fetchval("SELECT id FROM users WHERE chat_id=$1", callback.from_user.id)
+    description = (
+        f"الاسم: {data['name']}\n"
+        f"المبلغ المحول: {data['amount']} ل.س\n"
+        # f"رمز التحويل: {d ata['transfer_code']}"
+    )
     req_id = await db.fetchval(
         "INSERT INTO balance_requests (user_id, transfer_code, description) VALUES ($1, $2, $3) RETURNING id",
-        user_uuid, data['t_code'], message.text
+        user_uuid, data['transfer_code'], description
     )
     await state.clear()
-    await message.answer("✅ تم إرسال الطلب! يرجى انتظار موافقة المشرف.")
+    await callback.message.edit_text("✅ تم إرسال الطلب! يرجى انتظار موافقة المشرف.")
 
-    # إعداد البيانات للتنسيق
+    # تجهيز رسالة المشرف
     req_data = {
         'id': req_id,
-        'chat_id': message.from_user.id,
-        'full_name': message.from_user.full_name,
-        'transfer_code': data['t_code'],
-        'description': message.text if message.text != '.' else None,
+        'chat_id': callback.from_user.id,
+        'full_name': callback.from_user.full_name,
+        'transfer_code': data['transfer_code'],
+        'description': description,
     }
     admin_text = await format_balance_request(
         req_data,
@@ -181,6 +243,13 @@ async def user_done(message: types.Message, state: FSMContext, bot):
         types.InlineKeyboardButton(text="❌ رفض", callback_data=f"adm_den_{req_id}")
     )
     await bot.send_message(ADMIN_ID, admin_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@router.callback_query(UserCharge.waiting_confirmation, F.data == "cancel_charge")
+async def cancel_charge(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ تم إلغاء الطلب.")
+    await callback.answer()
 
 # -------------------------------------------------------------------
 # المشرف: عرض جميع الطلبات المعلقة (مع منع التكرار)
@@ -215,7 +284,7 @@ async def show_requests(callback: types.CallbackQuery):
             f"🆔 <b>رقم الطلب:</b> <code>{escape_html(row['id'])}</code>\n"
             f"👤 <b>المستخدم:</b> {escape_html(row['full_name'])} (ID: <code>{escape_html(row['chat_id'])}</code>)\n"
             f"🔑 <b>رمز التحويل:</b> <code>{escape_html(row['transfer_code'])}</code>\n"
-            f"📝 <b>الوصف:</b> {escape_html(row['description'] or '—')}\n"
+            f"📝 <b>الوصف:</b>\n{escape_html(row['description'] or '—')}\n"
             f"🕐 <b>تاريخ الإنشاء:</b> {escape_html(row['created_at'].strftime('%Y-%m-%d %H:%M'))}"
         )
         kb = InlineKeyboardBuilder()
@@ -290,7 +359,6 @@ async def admin_deny(callback: types.CallbackQuery, bot):
 async def admin_accept_start(callback: types.CallbackQuery, state: FSMContext):
     req_id = callback.data.split("_")[-1]
 
-    # التحقق من أن الطلب لا يزال معلقاً
     req = await db.fetchrow("SELECT status FROM balance_requests WHERE id=$1", req_id)
     if not req:
         await callback.message.edit_text("❌ الطلب غير موجود.")
@@ -302,12 +370,10 @@ async def admin_accept_start(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # حذف الأزرار من الرسالة الأصلية وإظهار التقدم
     await callback.message.delete()
-    await state.set_state(UserCharge.waiting_amount)
+    await state.set_state(AdminAccept.waiting_amount)   # تغيير الحالة
     await state.update_data(req_id=req_id)
 
-    # طلب المبلغ مع زر إلغاء
     builder = get_cancel_button()
     await callback.message.answer(
         "💰 أدخل <b>المبلغ</b> لإضافته إلى رصيد المستخدم:",
@@ -315,6 +381,88 @@ async def admin_accept_start(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML"
     )
     await callback.answer()
+
+@router.message(AdminAccept.waiting_amount, F.text.not_in(SPECIAL_BUTTONS))
+async def admin_accept_amount(message: types.Message, state: FSMContext, bot):
+    data = await state.get_data()
+    try:
+        amount = Decimal(message.text)
+    except InvalidOperation:
+        await message.answer("❌ الرجاء إدخال رقم صحيح.")
+        return
+
+    req_id = data['req_id']
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            request = await conn.fetchrow(
+                """SELECT br.id, br.transfer_code, br.status, br.created_at,
+                          u.id AS user_id, u.chat_id, u.full_name AS username,
+                          u.balance AS old_balance
+                   FROM balance_requests br
+                   JOIN users u ON u.id = br.user_id
+                   WHERE br.id = $1 FOR UPDATE""",
+                req_id
+            )
+            if not request:
+                await message.answer("❌ الطلب غير موجود.")
+                await state.clear()
+                return
+
+            if request['status'] != 'pending':
+                await message.answer("❌ تمت معالجة الطلب بالفعل.")
+                await state.clear()
+                return
+
+            new_balance = request['old_balance'] + amount
+            await conn.execute(
+                "UPDATE users SET balance = $1 WHERE id = $2",
+                new_balance, request['user_id']
+            )
+            await conn.execute(
+                "UPDATE balance_requests SET status='approved' WHERE id=$1",
+                req_id
+            )
+            await conn.execute(
+                "INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, 'charge')",
+                request['user_id'], amount
+            )
+
+    await state.clear()
+
+    req_data = dict(request)
+    req_data['amount'] = amount
+    req_data['full_name'] = request['username']
+
+    admin_text = await format_balance_request(
+        req_data,
+        bot,
+        include_user_info=True,
+        include_request_id=True,
+        include_balance=True,
+        status="approved",
+        new_balance=new_balance
+    )
+    await message.answer(admin_text, parse_mode="HTML")
+
+    user_text = await format_balance_request(
+        req_data,
+        bot,
+        include_user_info=False,
+        include_request_id=False,
+        include_balance=False,
+        status="approved",
+        new_balance=new_balance
+    )
+    user_kb = InlineKeyboardBuilder()
+    user_kb.row(types.InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="charge_balance"))
+    user_kb.row(types.InlineKeyboardButton(text="📊 عرض الرصيد", callback_data="show_balance"))
+    await bot.send_message(
+        request['chat_id'],
+        user_text,
+        parse_mode="HTML",
+        reply_markup=user_kb.as_markup()
+    )
 
 # -------------------------------------------------------------------
 # المشرف: إتمام القبول (استلام المبلغ)

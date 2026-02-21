@@ -115,7 +115,8 @@ async def admin_adjust_amount(message: types.Message, state: FSMContext):
         if amount <= 0:
             raise ValueError
     except (InvalidOperation, ValueError):
-        await message.answer("❌ الرجاء إدخال رقم موجب صحيح.")
+        builder = get_cancel_button()
+        await message.answer("❌ الرجاء إدخال رقم موجب صحيح.", reply_markup=builder.as_markup())
         return
     await state.update_data(amount=amount)
     data = await state.get_data()

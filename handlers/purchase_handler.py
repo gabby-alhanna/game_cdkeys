@@ -50,6 +50,7 @@ async def format_purchase_request(
         - created_at (اختياري datetime)
     """
     lines = []
+    lines.append(f"#طلب_شحن_لعبة\n\n")
     if include_request_id and data.get('id'):
         lines.append(f"🆔 <b>رقم الطلب:</b> <code>{escape_html(data['id'])}</code>")
     

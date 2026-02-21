@@ -61,7 +61,7 @@ async def show_main_menu(
             else:
                 await message.answer(welcome_text, parse_mode="HTML", reply_markup=reply_kb)
     
-    if user_id == ADMIN_CHAT_ID:
+    if user_id == 'ADMIN_CHAT_ID':
         text = (
             f"👤 <b>معرف المشرف:</b> <code>{escape_html(user_id)}</code>\n"
             f"⚡ <b>إدارة النظام</b>"
@@ -182,7 +182,7 @@ async def view_pending_request(callback: types.CallbackQuery, state: FSMContext)
         f"⏳ <b>طلب شحن معلق</b>\n\n"
         f"🆔 رقم الطلب: <code>{req['id']}</code>\n"
         f"🔑 رمز التحويل: <code>{escape_html(req['transfer_code'])}</code>\n"
-        f"📝 الوصف: {escape_html(req['description'] or '—')}\n"
+        f"📝 الوصف:\n{escape_html(req['description'] or '—')}\n"
         f"🕐 تاريخ الإنشاء: {req['created_at'].strftime('%Y-%m-%d %H:%M')}"
     )
     kb = InlineKeyboardBuilder()
