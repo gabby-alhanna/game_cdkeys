@@ -127,6 +127,12 @@ class DatabaseManager:
             if not await conn.fetchval("SELECT 1 FROM system_settings WHERE id = 1"):
                 await conn.execute("INSERT INTO system_settings (id) VALUES (1)")
             await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS referral_milestone INTEGER DEFAULT 15")
+
+            # إضافة أعمدة طرق الدفع الجديدة إذا لم تكن موجودة
+            await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS syriatel_code TEXT")
+            await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS syriatel_qr_file_id TEXT")
+            await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS mtn_code TEXT")
+            await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS mtn_qr_file_id TEXT")
         count = await self.fetchval("SELECT COUNT(*) FROM reply_buttons")
         if count == 0:
             defaults = [

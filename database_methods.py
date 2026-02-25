@@ -18,7 +18,7 @@ async def get_system_settings():
     return await db.fetchrow("SELECT superadmin_shamcash_code, superadmin_qr_file_id FROM system_settings WHERE id=1")
 
 async def is_system_ready():
-    s = await get_system_settings()
-    if not s or not s['superadmin_shamcash_code'] or not s['superadmin_qr_file_id']:
-        return False, dict(s)
-    return True, dict(s)
+    row = await db.fetchrow("SELECT * FROM system_settings WHERE id=1")
+    if not row:
+        return False, {}
+    return True, dict(row)

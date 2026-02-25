@@ -19,10 +19,12 @@ ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
 # المفتاح: chat_id المشرف، القيمة: قائمة معرفات الرسائل
 _last_request_messages = {}
 
+
 class AdminAccept(StatesGroup):
     waiting_amount = State()
 
 class UserCharge(StatesGroup):
+    waiting_payment_method = State()
     waiting_name = State()               # 1. الاسم في ShamCash
     waiting_amount = State()              # 2. المبلغ
     waiting_transfer_code = State()       # 3. رمز التحويل
@@ -88,6 +90,14 @@ async def format_balance_request(
 def escape_html(text):
     return html.escape(str(text) if text is not None else "")
 
+def method_display(method: str) -> str:
+    return {
+        'sham': 'شام كاش',
+        'syriatel': 'سيريتيل كاش',
+        'mtn': 'إم تي إن كاش'
+    }.get(method, method)
+
+
 @router.callback_query(F.data == "show_balance")
 async def show_balance(callback: types.CallbackQuery):
     balance = await db.fetchval("SELECT balance FROM users WHERE chat_id=$1", callback.from_user.id)
@@ -103,11 +113,6 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     if not ready:
         return await callback.answer("⚠️ النظام غير متاح حالياً.", show_alert=True)
 
-    if not config.get('superadmin_qr_file_id'):
-        await callback.message.answer("❌ لم يتم تعيين رمز QR للشحن بعد. يرجى إبلاغ المشرف.")
-        await callback.answer()
-        return
-
     pending = await db.fetchval(
         "SELECT 1 FROM balance_requests WHERE user_id=(SELECT id FROM users WHERE chat_id=$1) AND status='pending'",
         callback.from_user.id
@@ -115,13 +120,51 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     if pending:
         return await callback.answer("🚫 لديك طلب معلق بالفعل.", show_alert=True)
 
-    # نرسل رسالة QR ولكننا لا نطلب رمز التحويل الآن
+    # قائمة طرق الدفع
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="💰 شام كاش", callback_data="pay_method:sham"))
+    builder.row(types.InlineKeyboardButton(text="📱 سيريتيل كاش", callback_data="pay_method:syriatel"))
+    builder.row(types.InlineKeyboardButton(text="📱 إم تي إن كاش", callback_data="pay_method:mtn"))
+    builder.row(types.InlineKeyboardButton(text="🔙 تراجع", callback_data="back_to_main"))
+    await callback.message.edit_text(
+        "🔹 **اختر طريقة الدفع** 🔹\n\n"
+        "يرجى اختيار إحدى طرق الدفع المتاحة:",
+        reply_markup=builder.as_markup()
+    )
+    await callback.answer()
+    await state.set_state(UserCharge.waiting_payment_method)
+@router.callback_query(UserCharge.waiting_payment_method, F.data.startswith("pay_method:"))
+async def payment_method_selected(callback: types.CallbackQuery, state: FSMContext):
+    method = callback.data.split(":")[1]
+    ready, config = await is_system_ready()
+
+    if method == "sham":
+        code = config.get('superadmin_shamcash_code')
+        qr = config.get('superadmin_qr_file_id')
+    elif method == "syriatel":
+        code = config.get('syriatel_code')
+        qr = config.get('syriatel_qr_file_id')
+    elif method == "mtn":
+        code = config.get('mtn_code')
+        qr = config.get('mtn_qr_file_id')
+    else:
+        await callback.answer("طريقة دفع غير صالحة", show_alert=True)
+        return
+
+    if not code:
+        await callback.message.edit_text(f"❌ لم يتم تعيين رمز {method_display(method)} بعد. يرجى إبلاغ المشرف.")
+        return
+    if not qr:
+        await callback.message.edit_text(f"❌ لم يتم تعيين صورة QR لـ {method_display(method)} بعد. يرجى إبلاغ المشرف.")
+        return
+
+    await state.update_data(payment_method=method)
     await state.set_state(UserCharge.waiting_name)
     builder = get_cancel_button()
-    caption = f"💳 <b>رمز ShamCash:</b> <code>{escape_html(config['superadmin_shamcash_code'])}</code>\n\nالخطوة 1: أرسل <b>الاسم كما يظهر في ShamCash</b>:"
+    caption = f"💳 <b>رمز {method_display(method)}:</b> <code>{escape_html(code)}</code>\n\nالخطوة 1: أرسل <b>الاسم كما يظهر في الدفع</b>:"
     try:
         await callback.message.answer_photo(
-            photo=config['superadmin_qr_file_id'],
+            photo=qr,
             caption=caption,
             reply_markup=builder.as_markup(),
             parse_mode="HTML"
@@ -129,7 +172,6 @@ async def start_charge(callback: types.CallbackQuery, state: FSMContext):
     except Exception as e:
         logging.error(f"فشل إرسال صورة QR: {e}")
         await callback.message.answer(caption, reply_markup=builder.as_markup(), parse_mode="HTML")
-
     await callback.message.delete()
     await callback.answer()
 
@@ -210,10 +252,12 @@ async def user_code(message: types.Message, state: FSMContext):
 async def confirm_charge(callback: types.CallbackQuery, state: FSMContext, bot):
     data = await state.get_data()
     user_uuid = await db.fetchval("SELECT id FROM users WHERE chat_id=$1", callback.from_user.id)
+    method_name = method_display(data['payment_method'])
     description = (
+        f"طريقة الدفع: {method_name}\n"
         f"الاسم: {data['name']}\n"
         f"المبلغ المحول: {data['amount']} ل.س\n"
-        # f"رمز التحويل: {d ata['transfer_code']}"
+        f"رمز التحويل: {data['transfer_code']}"
     )
     req_id = await db.fetchval(
         "INSERT INTO balance_requests (user_id, transfer_code, description) VALUES ($1, $2, $3) RETURNING id",
@@ -222,7 +266,6 @@ async def confirm_charge(callback: types.CallbackQuery, state: FSMContext, bot):
     await state.clear()
     await callback.message.edit_text("✅ تم إرسال الطلب! يرجى انتظار موافقة المشرف.")
 
-    # تجهيز رسالة المشرف
     req_data = {
         'id': req_id,
         'chat_id': callback.from_user.id,
