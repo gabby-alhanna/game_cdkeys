@@ -15,7 +15,9 @@ router = Router()
 ADMIN_ID = int(os.getenv("ADMIN_CHAT_ID"))
 
 class PurchaseRequest(StatesGroup):
-    waiting_account_id = State()
+    waiting_account_id = State()          # للألعاب العادية
+    waiting_clash_email = State()          # لـ Clash of Clans: البريد الإلكتروني
+    waiting_clash_phone = State()          # لـ Clash of Clans: رقم الهاتف
     waiting_confirmation = State()
 
 # Store message IDs of the last "admin_purchases" output per admin
@@ -24,11 +26,39 @@ _last_purchase_messages = {}
 def escape_html(text):
     return html.escape(str(text) if text is not None else "")
 
+def is_supercell_game(game_name: str) -> bool:
+    """التحقق مما إذا كانت اللعبة من ألعاب Supercell."""
+    name_lower = game_name.lower()
+    return "clash of clans" in name_lower or "clash royale" in name_lower
+
+def is_valid_email(email: str) -> bool:
+    """التحقق الأساسي من البريد الإلكتروني: يحتوي على @ ونقطة بعدها."""
+    return "@" in email and "." in email.split("@")[-1]
+
+def is_valid_phone(phone: str) -> bool:
+    """التحقق الأساسي من رقم الهاتف: أرقام، و+ اختياري في البداية، وشرطات مسموحة."""
+    # إزالة المسافات والشرطات
+    cleaned = phone.replace(" ", "").replace("-", "")
+    if not cleaned:
+        return False
+    # يجب أن يبدأ برقم أو +
+    if cleaned[0] == '+':
+        cleaned = cleaned[1:]
+    return cleaned.isdigit()
+
 def format_user_display(chat_id: int, full_name: str, username: str = None) -> str:
-    """إرجاع عرض المستخدم مع اسم المستخدم إن وجد، وإلا الاسم الكامل."""
     if username:
         return f"@{username} ({escape_html(full_name)})"
     return escape_html(full_name)
+
+async def get_username_display(bot, user_id: int, full_name: str) -> str:
+    try:
+        chat = await bot.get_chat(user_id)
+        if chat.username:
+            return f"@{chat.username}"
+    except:
+        pass
+    return full_name
 
 async def format_purchase_request(
     data: dict,
@@ -38,17 +68,6 @@ async def format_purchase_request(
     include_balance: bool = False,
     status: str = None
 ) -> str:
-    """
-    تنسيق تفاصيل طلب الشراء في رسالة HTML متسقة.
-    data: قاموس يحتوي على الحقول التالية:
-        - id (اختياري)
-        - chat_id (معرف المستخدم في تليغرام)
-        - full_name (الاسم الكامل للمستخدم)
-        - game_name, package_name, price, game_account_id
-        - game_description (اختياري)
-        - balance (اختياري)
-        - created_at (اختياري datetime)
-    """
     lines = []
     lines.append(f"#طلب_شحن_لعبة\n\n")
     if include_request_id and data.get('id'):
@@ -70,7 +89,7 @@ async def format_purchase_request(
     
     acc = data.get('game_account_id') or data.get('account_id')
     if acc:
-        lines.append(f"🆔 <b>معرف حساب اللعبة:</b> <code>{escape_html(acc)}</code>")
+        lines.append(f"🆔 <b>معلومات الحساب:</b>\n<code>{escape_html(acc)}</code>")
     
     if data.get('game_description'):
         lines.append(f"📝 <b>وصف اللعبة:</b> {escape_html(data['game_description'])}")
@@ -87,7 +106,6 @@ async def format_purchase_request(
             lines.append(f"\n⏳ <b>الحالة: معلق</b>")
     
     return "\n".join(lines)
-
 
 async def get_username_display(bot, user_id: int, full_name: str) -> str:
     try:
@@ -129,6 +147,7 @@ async def buy_package_start(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    # تخزين البيانات الأساسية
     await state.update_data(
         package_id=package_id,
         game_id=pkg['game_id'],
@@ -137,13 +156,25 @@ async def buy_package_start(callback: types.CallbackQuery, state: FSMContext):
         price=price,
         user_id=user['id']
     )
-    await state.set_state(PurchaseRequest.waiting_account_id)
-    builder = get_cancel_button()
-    await callback.message.answer(
-        "🎮 ارسل معرفك داخل اللعبة",
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML"
-    )
+
+    # التحقق مما إذا كانت اللعبة هي Clash of Clans
+    if is_supercell_game(pkg['game_name']):
+        await state.set_state(PurchaseRequest.waiting_clash_email)
+        builder = get_cancel_button()
+        await callback.message.answer(
+            f"📧 **{pkg['game_name']}**\n\nالرجاء إرسال **البريد الإلكتروني** المرتبط بحسابك في Supercell:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        await state.set_state(PurchaseRequest.waiting_account_id)
+        builder = get_cancel_button()
+        await callback.message.answer(
+            "🎮 أرسل **معرف حسابك** في اللعبة:",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML"
+        )
+
     await callback.message.delete()
     await callback.answer()
 
@@ -154,15 +185,62 @@ async def receive_account_id(message: types.Message, state: FSMContext):
         await message.answer("❌ لا يمكن أن يكون معرف الحساب فارغاً. الرجاء إدخال معرف صحيح.")
         return
     await state.update_data(account_id=account_id)
-    data = await state.get_data()
-    text = (
-        f"📝 **يرجى تأكيد عملية الشراء**\n\n"
-        f"🎮 اللعبة: {escape_html(data['game_name'])}\n"
-        f"📦 الحزمة: {escape_html(data['package_name'])}\n"
-        f"💰 السعر: {data['price']} ل.س\n"
-        f"🆔 معرف الحساب: <code>{escape_html(account_id)}</code>\n\n"
-        f"هل هذه المعلومات صحيحة؟"
+    await show_purchase_confirmation(message, state)
+
+
+
+@router.message(PurchaseRequest.waiting_clash_email, F.text.not_in(SPECIAL_BUTTONS))
+async def receive_clash_email(message: types.Message, state: FSMContext):
+    email = message.text.strip()
+    if not email:
+        await message.answer("❌ البريد الإلكتروني لا يمكن أن يكون فارغاً.")
+        return
+    if not is_valid_email(email):
+        await message.answer("❌ البريد الإلكتروني غير صالح. يجب أن يحتوي على @ ونقطة (مثال: name@domain.com).")
+        return
+    await state.update_data(clash_email=email)
+    await state.set_state(PurchaseRequest.waiting_clash_phone)
+    builder = get_cancel_button()
+    await message.answer(
+        "📞 الآن أرسل **رقم الهاتف** المرتبط بحساب Supercell (مع مفتاح الدولة، مثال: +966512345678):",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML"
     )
+
+@router.message(PurchaseRequest.waiting_clash_phone, F.text.not_in(SPECIAL_BUTTONS))
+async def receive_clash_phone(message: types.Message, state: FSMContext):
+    phone = message.text.strip()
+    if not phone:
+        await message.answer("❌ رقم الهاتف لا يمكن أن يكون فارغاً.")
+        return
+    if not is_valid_phone(phone):
+        await message.answer("❌ رقم الهاتف غير صالح. يجب أن يتكون من أرقام، ويمكن أن يبدأ بـ + (مثال: +966512345678).")
+        return
+    await state.update_data(clash_phone=phone)
+    # دمج البريد والهاتف في نص واحد لتخزينه كـ game_account_id
+    data = await state.get_data()
+    combined = f"البريد الإلكتروني: {data['clash_email']}\nرقم الهاتف: {phone}"
+    await state.update_data(account_id=combined)
+    await show_purchase_confirmation(message, state)
+
+
+async def show_purchase_confirmation(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    # بناء النص حسب نوع اللعبة
+    info_lines = [
+        f"🎮 اللعبة: {escape_html(data['game_name'])}",
+        f"📦 الحزمة: {escape_html(data['package_name'])}",
+        f"💰 السعر: {data['price']} ل.س",
+    ]
+    if 'account_id' in data:
+        if is_supercell_game(data['game_name']):
+            # عرض البريد والهاتف بشكل منفصل
+            info_lines.append(f"📧 البريد الإلكتروني: {escape_html(data['clash_email'])}")
+            info_lines.append(f"📞 رقم الهاتف: {escape_html(data['clash_phone'])}")
+        else:
+            info_lines.append(f"🆔 معرف الحساب: <code>{escape_html(data['account_id'])}</code>")
+
+    text = "📝 **يرجى تأكيد عملية الشراء**\n\n" + "\n".join(info_lines) + "\n\nهل هذه المعلومات صحيحة؟"
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="✅ نعم، متابعة", callback_data="purchase_confirm_yes"),
@@ -170,8 +248,7 @@ async def receive_account_id(message: types.Message, state: FSMContext):
     )
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
     await state.set_state(PurchaseRequest.waiting_confirmation)
-
-@router.callback_query(PurchaseRequest.waiting_confirmation, F.data == "purchase_confirm_yes")
+    
 @router.callback_query(PurchaseRequest.waiting_confirmation, F.data == "purchase_confirm_yes")
 async def purchase_confirm_yes(callback: types.CallbackQuery, state: FSMContext, bot):
     data = await state.get_data()
@@ -182,13 +259,8 @@ async def purchase_confirm_yes(callback: types.CallbackQuery, state: FSMContext,
     """, data['user_id'], data['game_id'], data['package_id'], data['account_id'], data['price'])
     await state.clear()
     await callback.message.edit_text("✅ تم إرسال طلب الشراء إلى المشرف. سيتم إعلامك عند الموافقة.")
-    
-    # أزرار للمستخدم بعد الطلب
-    # user_kb = InlineKeyboardBuilder()
-    # user_kb.row(types.InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="charge_balance"))
-    # user_kb.row(types.InlineKeyboardButton(text="📊 عرض الرصيد", callback_data="show_balance"))
-    # await callback.message.answer("ماذا تريد أن تفعل بعد ذلك؟", reply_markup=user_kb.as_markup())
     await callback.message.answer("قد تستغرق العملية من نصف ساعة لساعة")
+
     # جلب تفاصيل الطلب كاملة للمشرف
     req_row = await db.fetchrow("""
         SELECT pr.id, pr.game_account_id, pr.price, pr.created_at,
@@ -224,7 +296,6 @@ async def purchase_confirm_no(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("❌ تم إلغاء الشراء.")
     await callback.answer()
-
 
 # ------------------ قائمة طلبات الشراء المعلقة للمشرف (مع التنظيف) ------------------
 @router.callback_query(F.data == "admin_purchases")
