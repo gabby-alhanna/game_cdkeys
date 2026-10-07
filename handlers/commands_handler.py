@@ -10,6 +10,7 @@ from .settings_handler import show_settings_menu
 from .referral_handler import process_referral
 from database import db
 from decimal import Decimal
+from aiogram.exceptions import TelegramBadRequest
 
 router = Router()
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
@@ -51,15 +52,17 @@ async def show_main_menu(
             reply_kb = await build_reply_keyboard(is_admin) if set_reply_keyboard else None
             
             welcome_text = main_button['description'] or "مرحباً بك في البوت!"
-            if main_button['image_file_id']:
-                await message.answer_photo(
-                    photo=main_button['image_file_id'],
-                    caption=welcome_text,
-                    reply_markup=reply_kb,
-                    parse_mode="HTML"
-                )
-            else:
-                await message.answer(welcome_text, parse_mode="HTML", reply_markup=reply_kb)
+            if main_button and main_button.get('image_file_id'):
+                try:
+                    await message.answer_photo(
+                        photo=main_button['image_file_id'],
+                        caption=welcome_text,
+                        reply_markup=reply_kb,
+                        parse_mode="HTML"
+                    )
+                except TelegramBadRequest:
+                    await message.answer(welcome_text, parse_mode="HTML", reply_markup=reply_kb)
+               
     
     if user_id == ADMIN_CHAT_ID:
         text = (
@@ -127,17 +130,29 @@ async def handle_reply_buttons(message: types.Message, state: FSMContext):
         elif key == 'help':
             await state.clear()
             text = btn['description'] or "ℹ️ لم يتم تعيين نص المساعدة."
+            sent_photo = False
             if btn['image_file_id']:
-                await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
-            else:
+                try:
+                    await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
+                    sent_photo = True
+                except TelegramBadRequest:
+                    pass
+            if not sent_photo:
                 await message.answer(text, parse_mode="HTML")
+
         elif key == 'about':
             await state.clear()
             text = btn['description'] or "ℹ️ لم يتم تعيين نص المعلومات."
+            sent_photo = False
             if btn['image_file_id']:
-                await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
-            else:
+                try:
+                    await message.answer_photo(photo=btn['image_file_id'], caption=text, parse_mode="HTML")
+                    sent_photo = True
+                except TelegramBadRequest:
+                    pass
+            if not sent_photo:
                 await message.answer(text, parse_mode="HTML")
+
         return
 
     # 3. Handle Settings button
